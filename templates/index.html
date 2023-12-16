@@ -15,193 +15,68 @@
 
       <div id="hider">
         <div id="loader"></div>
-        <!--<small><small class="lh-1">
-          You may experience long loading times due to the rigorous nature of the genetic programming.
-        </small></small>-->
       </div>
       <div id="cover"></div>
 
-      <!--<div>
-        <h1>Symbolic Learning</h1>
-        {{pr_eq}}
-        <br>
-        <p><i>Equation to learn:</i><br><hr width="500px" color="#eaeaea" style="margin:0;"><br>
-          &ensp;&ensp;y &ensp;=&ensp; <strong>cos(</strong> <sup>1</sup>&frasl;
-          <sub><input type="number" name="c1" value="{{c1}}" /></sub>
-          &#183;X
-          <sup><input type="number" name="e1" value="{{e1}}" /></sup>
-          <strong>)</strong> &ensp;+&ensp; <strong>sin(</strong> <sup>1</sup>&frasl;
-          <sub><input type="number" name="c2" value="{{c2}}" /></sub>
-          &#183;X
-          <sup><input type="number" name="e2" value="{{e2}}" /></sup>
-          <strong>)</strong> &ensp;&#183;&ensp; <strong>arctan(</strong> <sup>1</sup>&frasl;
-          <sub><input type="number" name="c3" value="{{c3}}" /></sub>
-          &#183;X
-          <sup><input type="number" name="e3" value="{{e3}}" /></sup>
-          <strong>)</strong>
-          <br><br><hr width="500px" color="#eaeaea" style="margin:0;"><br>
-          <input type="button" value="Learn Random" onclick="random_learn()" />
-          <input type="button" value="Learn" onclick="reload_learn()" />
-          <input type="button" value="Replay Anims" onclick="replay_anims()" />
-        </p>
-      </div>-->
-
-        <div class="row mt-4 title">
-          <h1>Symbolic Learning</h1>
-        </div>
-        <div class="row body">
-          <div class="col-md-6 mt-2">
-            <p><i>Equation to learn:</i><br>
-              <!--<p>Score</p>
-              <p>{{pct_score}}</p>
-              <p>{{pct}}</p><br>
-              <br>
-              <p>Normalized Score</p>
-              <p>{{pct_score_n}}</p>
-              <p>{{pct_n}}</p>
-              <br>
-              <p>Clipped Score</p>
-              <p>{{pct_score_clip}}</p>
-              <p>{{pct_c}}</p>
-              <br>
-              <p>Clipped & Normalized Score</p>
-              <p>{{pct_score_clip_n}}</p>
-              <p>{{pct_c_n}}</p>
-              <br>
-              <p>Z Score</p>
-              <p>{{score_z}}</p>
-              <p>{{pct_z}}</p>
-              <br>
-              <p>Log Score</p>
-              <p>{{score_log}}</p>
-              <p>{{pct_log}}</p>
-              <br>
-              <p>Sigmoid Score</p>
-              <p>{{score_sig}}</p>
-              <p>{{pct_sig}}</p>-->
-              <hr width="100%" color="#eaeaea" style="margin:0;"><br>
-              <!--<input type="radio" name="eq_selection" value="1" id="eq1" class="form-check-input">-->
-
-              <small>
-
-                <!--&ensp;&ensp;y&ensp;=&ensp;
-                [<input type="number" name="e1" value="{{e1}}" />
-                &ensp;<strong>&#183;</strong>&ensp;
-                <strong>cos(</strong>
-                <input type="number" name="c1" value="{{c1}}" />
-                &#183;X
-                <strong>)</strong>]
-
-                &ensp;+&ensp;
-                [<input type="number" name="e2" value="{{e2}}" />
-                &ensp;<strong>&#183;</strong>&ensp;
-                <strong>sin(</strong>
-                <input type="number" name="c2" value="{{c2}}" />
-                &#183;X
-                <strong>)</strong>
-
-                &ensp;<strong>&#183;</strong>&ensp;
-                <input type="number" name="e3" value="{{e3}}" />
-                &ensp;<strong>&#183;</strong>&ensp;
-                <strong>arctan(</strong>
-                <input type="number" name="c3" value="{{c3}}" />
-                &#183;X
-                <strong>)</strong>]-->
-
-                <math>
-                  <mrow>
-                    <mi>y</mi>
-                    <mo>=</mo>
-                    <mn><input type="number" name="e1" value="{{e1}}" /></mn>
-                    <mi>cos</mi>
-                    <mo>(</mo>
-                    <mn><input type="number" name="c1" value="{{c1}}" /></mn>
-                    <mi>X</mi>
-                    <mo>)</mo>
-                    <mo>+</mo>
-                    <mn><input type="number" name="e2" value="{{e2}}" /></mn>
-                    <mi>sin</mi>
-                    <mo>(</mo>
-                    <mn><input type="number" name="c2" value="{{c2}}" /></mn>
-                    <mi>X</mi>
-                    <mo>)</mo>
-                    <mn><input type="number" name="e3" value="{{e3}}" /></mn>
-                    <mi>arctan</mi>
-                    <mo>(</mo>
-                    <mn><input type="number" name="c3" value="{{c3}}" /></mn>
-                    <mi>X</mi>
-                    <mo>)</mo>
-
-                  </mrow>
-                </math>
-
-              </small>
-
-              <!--<br><br><hr width="100%" color="#eaeaea" style="margin:0;"><br>
-
-              <div class="row">
-                <div class="col-auto">
-                  <input type="radio" name="eq_selection" value="2" id="eq2" class="form-check-input">
-                </div>
-                <div class="col-auto">
-                  <small>
-                    <math>
-                      <mrow>
-                        <mi>y</mi>
-                        <mo>=</mo>
-                        
-                        <mfrac>
-
-                          <mrow>
-                            <mi>arctan</mi>
-                            <mo>(</mo>
-                            <mi>X</mi>
-                            <mo>)</mo>
-                            <mo>+</mo>
-                            <mi>sin</mi>
-                            <mo>(</mo>
-                            <msup>
-                              <mi>X</mi>
-                              <mn><input type="number" name="e1" value="{{e1}}" /></mn>
-                            </msup>
-                            <mo>)</mo>
-                          </mrow>
-
-                          <mrow>
-                            <mn><input type="number" name="c1" value="{{c1}}" /></mn>
-                            <mi>cos</mi>
-                            <mo>(</mo>
-                            <mi>X</mi>
-                            <mo>)</mo>
-                          </mrow>
-
-                        </mfrac>
-                      </mrow>
-                    </math>
-                  </small>
-                </div>
-              </div>-->
-              <br><br><hr width="100%" color="#eaeaea" style="margin:0;"><br>
-
-
-              <div class="form-check ms-3">
-                <small>
-                  <input class="form-check-input mt-2" type="checkbox" id="low_memory">
-                  <label class="form-check-label mt-1" for="low_memory">Enable Low Memory Mode</label>
-                </small>
-              </div>
-              <small><input type="button" class="btn btn-outline-secondary m-2" value="Randomize" onclick="random_learn()" /></small>
-              <small><input type="button" class="btn btn-outline-secondary m-2" value="Learn" onclick="reload_learn()" /></small>
-              <small><input type="button" class="btn btn-outline-secondary m-2" value="Replay Anims" onclick="replay_anims()" /></small>
-            </p>
-            <br>
-            <p><strong>Predicted Equation: </strong>{{pr_eq}}</p>
-            <p><strong>Formatted Equation: </strong>{{pr_eq_formatted}}</p>
-            <p><strong>Score of Accuracy: </strong>{{score}}</p>
-            <p><strong>Percentage of Accuracy: </strong>{{pct_score}}%</p>
+      <div class="row body">
+        <div class="col-md-6 mt-2">
+          <div class="mt-4 title">
+            <h1>Symbolic Learning</h1>
           </div>
+          <br>
+          <p><i>Equation to learn:</i><br>
+            <hr width="100%" color="#eaeaea" style="margin:0;"><br>
 
-          <div class="col-md-6 about pt-3">
+            <small>
+
+              <math>
+                <mrow>
+                  <mi>y</mi>
+                  <mo>=</mo>
+                  <mn><input type="number" name="e1" value="{{e1}}" /></mn>
+                  <mi>cos</mi>
+                  <mo>(</mo>
+                  <mn><input type="number" name="c1" value="{{c1}}" /></mn>
+                  <mi>X</mi>
+                  <mo>)</mo>
+                  <mo>+</mo>
+                  <mn><input type="number" name="e2" value="{{e2}}" /></mn>
+                  <mi>sin</mi>
+                  <mo>(</mo>
+                  <mn><input type="number" name="c2" value="{{c2}}" /></mn>
+                  <mi>X</mi>
+                  <mo>)</mo>
+                  <mn><input type="number" name="e3" value="{{e3}}" /></mn>
+                  <mi>arctan</mi>
+                  <mo>(</mo>
+                  <mn><input type="number" name="c3" value="{{c3}}" /></mn>
+                  <mi>X</mi>
+                  <mo>)</mo>
+
+                </mrow>
+              </math>
+
+            </small>
+            <br><br><hr width="100%" color="#eaeaea" style="margin:0;">
+
+
+            <div class="form-check ms-3 mt-3">
+              <small>
+                <input class="form-check-input mt-2" type="checkbox" id="low_memory">
+                <label class="form-check-label mt-1" for="low_memory">Enable Low Memory Mode</label>
+              </small>
+            </div>
+            <small><input type="button" class="btn btn-outline-secondary m-2" value="Randomize" onclick="random_learn()" /></small>
+            <small><input type="button" class="btn btn-outline-secondary m-2" value="Learn" onclick="reload_learn()" /></small>
+            <small><input type="button" class="btn btn-outline-secondary m-2" value="Replay Anims" onclick="replay_anims()" /></small>
+          </p>
+          <br>
+          <!--<p><strong>Predicted Equation: </strong>{{pr_eq}}</p>-->
+          <p><strong>Formatted Equation: </strong>{{pr_eq_formatted}}</p>
+          <!--<p><strong>Score of Accuracy: </strong>{{score}}</p>-->
+          <p><strong>Percentage of Accuracy: </strong>{{pct_score}}%</p>
+
+          <div class="about p-2 mt-4">
             <h4>About Symbolic Learning</h4>
             <p>This page utilizes a form of symbolic regression to perform genetic programming.
             The goal is to find a mathematic formula that can best represent the input data.
@@ -211,43 +86,28 @@
             This generates a "population size" of equations that attempt to fit the input data.
             The best of these equations continue onto the next "generation" of equations.
             In this case, a population size of {{ps}} is being used across {{ga}} generations. </p>
-            <small><small class="lh-1">
-              You may experience long loading times due to the rigorous nature of the genetic programming.
-            </small></small>
           </div>
-
         </div>
 
-          
-          <div class="plots bg-white row">
-              <div style="clear:left;" id="actual_plot" class="col-md-4">
-                <!--<h3>Actual Plot</h3>-->
-              </div>
-              <div id="predicted_plot" class="col-md-4">
-                <!--<h3>Predicted Plot</h3>-->
-              </div>
-              <div id="live_plot" class="col-md-4">
-                <!--<h3>Live Plot</h3>-->
-              </div>
-              <div id="full_plot" class="col-md-6">
-                <!--<h3>Full Plot</h3>-->
-              </div>
-            </div>
-          </div>
+        <div class="col-md-6 plots">
+          <div id="full_plot" class=""></div>
+        </div>
+
+      </div>
+
+
+      <!--<div class="row mt-4">
+        <small><small class="lh-1">
+          You may experience long loading times due to the rigorous nature of the genetic programming.
+        </small></small>
+      </div>-->
 
     </div>
 
-
     <script>
-      document.getElementById("actual_plot").innerHTML += htmlDecode("{{actual}}");
-      document.getElementById("predicted_plot").innerHTML += htmlDecode("{{predicted}}");
-      document.getElementById("live_plot").innerHTML += htmlDecode("{{live}}");
       document.getElementById("full_plot").innerHTML += htmlDecode("{{full_plot}}");
 
-      if (document.getElementById("live_plot").innerHTML.includes("Low Memory")){
-        var lp = document.getElementById("live_plot");
-        lp.parentElement.removeChild(lp);
-      }; document.getElementById("low_memory").checked = "{{low_mem}}" == "True";
+      document.getElementById("low_memory").checked = "{{low_mem}}" == "True";
 
       $(function(){
         $(':input[type="number"]').change(function () {
