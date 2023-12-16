@@ -10,6 +10,7 @@ from flask import Flask, Response, render_template
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib import animation
+import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 #from tensorflow import keras
@@ -49,6 +50,41 @@ axis.set_ylim(-10,10)
 line, = axis.plot([], [], lw=2)
 line2, = axis.plot([], [], lw=1)
 
+
+fig_one = Figure()
+#axs = fig_one.add_subplot(3,1,1)
+fig_one, axs = plt.subplots(4, sharex=True)
+fig_one.suptitle('A tale of regression metrics')
+fig_one.set_facecolor('lightskyblue')
+fig_one.set_alpha(0.5)
+fig_one.set_figheight(10)
+axs[0].set_title("Actual")
+axs[1].set_title("Predicted")
+axs[2].set_title("Live")
+axs[3].set_title("R^2 Score of Determination")
+line_act, = axs[0].plot([], [], lw=2, color=acutal_color)
+line_pred, = axs[1].plot([], [], lw=2, color=predicted_color)
+line_live, = axs[2].plot([], [], lw=2, color=live_color)
+line_score, = axs[3].plot([], [], lw=2, color="red")
+lines = [line_act, line_pred, line_live, line_score]
+for idx, ax in enumerate(axs):
+    ax.set_xlim(-domain/2,domain/2)
+    if idx == len(axs)-1:
+        ax.set_ylim(0,100)
+    else:
+        ax.set_ylim(-10,10)
+    ax.grid()
+
+######
+#np.append( axs, fig_one.add_subplot(1,1,1) )
+#axs[len(axs)-1].set_title("R^2 Score of Determination")
+#axs[len(axs)-1].set_xlim(-domain/2,domain/2)
+#axs[len(axs)-1].set_ylim(-10,10)
+#axs[len(axs)-1].grid()
+#temp_line, = axs[len(axs)-1].plot([], [], lw=2, color="red", ls='-.')
+#np.append(lines, temp_line)
+#####
+
 predict_final = []
 live_xs = []
 live_ys = []
@@ -62,13 +98,14 @@ p_point_mutation = 0.02       #0.01     0.1     0.12
 p_point_replace = 0.05        #0.05             0.05
 
 parsimony_coefficient = 0.005  #                 0.005
-
-max_samples = 0.6
+    
+max_samples = 0.6   #52.6
 
 ## 500 pop & 20 gen - cause timeout
 pop_size = 800                #1000     5000
 gen_amt = 20                  #20       40
 tournament_size = 10          #5                20
+
 
 def _power(x1, x2):
     with np.errstate(over='ignore'):
@@ -83,9 +120,7 @@ def _mape(y, y_pred, w=None):
 mape = make_fitness(function=_mape, greater_is_better=False, wrap=False)
 
 def _sigmoid(y, y_pred, w=None):
-    y_actual = np.array(y)
-    y_pred = np.array(y_pred)
-    diff = np.abs( y_pred - y_actual )
+    diff = np.abs( y_pred - y )
     sig = (2/(1+np.power(math.e, -diff)))-1
     return (np.average( sig , weights=w))
 sigmoid = make_fitness(function=_sigmoid, greater_is_better=False, wrap=False)
@@ -146,7 +181,6 @@ def index_blank():
         actual=actual, predicted=predicted, live=live, 
         pr_eq=predicted_equation)
 
-
 @app.route("/<values>")
 def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
     #print("Calculated models requested...")
@@ -160,73 +194,54 @@ def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
     e3 = float(v[5])
     low_memory = bool(int(v[6]))
 
-    fig.suptitle('Actual Plot', fontsize=20)
-    anim = animation.FuncAnimation(fig, animate_actual, frames=100, interval=40, blit=True, repeat=False)
-    actual = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
+    #fig.suptitle('Actual Plot', fontsize=20)
+    #anim = animation.FuncAnimation(fig, animate_actual, frames=100, interval=40, blit=True, repeat=False)
+    #actual = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
     #print("Actual graph is plotted.")
 
     x_train = np.arange(-domain/2, domain/2, global_step)
-    y_train = [eq(x) for x in x_train]
-    sr.fit(x_train.reshape(-1,1), y_train)
+    y_actual = [eq(x) for x in x_train]
+    sr.fit(x_train.reshape(-1,1), y_actual)
     #print("Model is trained.")
 
-    #x_temp = np.arange(-domain/2, domain/2, global_step)
     predict_final = sr.predict(x_train.reshape(-1,1))
+    predicted_equation = sr._program
     #print("Prediction is made.")
 
-    y_actual = [eq(x) for x in x_train]
     score = str( round(sr.score(x_train.reshape(-1,1), y_actual), 3) )
-    #score = str(_mape(y_actual, predict_final))[:6]
     pct_score = str( round( 100-(_sigmoid(y_actual, predict_final)*100), 3) )
     #print("Score is calculated.")
 
-    fig.suptitle('Predicted Plot', fontsize=20)
-    if low_memory:
-        anim = animation.FuncAnimation(fig, animate_low_mem, frames=100, interval=40, blit=True, repeat=False)
-    else:
-        anim = animation.FuncAnimation(fig, animate_predicted, frames=100, interval=40, blit=True, repeat=False)
-    predicted = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
+    #fig.suptitle('Predicted Plot', fontsize=20)
+    #if low_memory:
+        #anim = animation.FuncAnimation(fig, animate_low_mem, frames=100, interval=40, blit=True, repeat=False)
+    #else:
+        #anim = animation.FuncAnimation(fig, animate_predicted, frames=100, interval=40, blit=True, repeat=False)
+    #predicted = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
     #print("Prediction graph is plotted.")
 
-    live = "Live plot not available in Low Memory Mode."
-    if not low_memory:
-        fig.suptitle('Live Plot', fontsize=20)
-        anim = animation.FuncAnimation(fig, animate_live_learning, frames=100, interval=40, blit=True, repeat=False)
-        live = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
+    #live = "Live plot not available in Low Memory Mode."
+    #if not low_memory:
+        #fig.suptitle('Live Plot', fontsize=20)
+        #anim = animation.FuncAnimation(fig, animate_live_learning, frames=100, interval=40, blit=True, repeat=False)
+        #live = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
         #print("Live graph is ploted.")
 
-    predicted_equation = sr._program
+    actual=""
+    predicted=""
+    live=""
 
-    #diff = np.abs(np.array(y_actual) - np.array(predict_final))
-    #diff/=np.abs(y_actual)
-    #pct_score=np.average(diff)*100
+    #for line in lines:
+    #    line.set_data([], [])
 
-    #diff_sig = np.array([(2/(1+np.power(math.e, -y)))-1 for y in diff])
-    #score_sig = np.average(diff_sig)*100
-    #pct_sig = str(100 - score_sig)[:4] + "%"
+    #if low_memory:
+    #    anim = animation.FuncAnimation(fig_one, control_animation_lm, frames=100, interval=40, blit=True, repeat=False)
+    #else:
+    #    anim = animation.FuncAnimation(fig_one, control_animation, frames=100, interval=40, blit=True, repeat=False)
 
-    #diff_z = (diff - np.mean(diff)) / np.std(diff)
-    #score_z = np.average(diff_z)*100
+    anim = animation.FuncAnimation(fig_one, animate_all, frames=100, interval=40, blit=True, repeat=False)
+    full_plot = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
 
-    #diff_log = np.array([np.log(y) for y in diff])
-    #score_log = np.average(diff_log)*100
-
-    #diff_clip = np.array([(y<domain/2 and y>-domain/2 and y) or (y>0 and domain/2) or (y<0 and -domain/2) for y in diff])
-    #pct_score_clip = np.average(diff_clip)*100
-    #pct_score_clip_n = np.average(diff_clip/domain/2)*100
-
-    #diff_n = diff/diff.max()
-    #pct_score_n=np.average(diff_n)*100
-
-    #diff = [round(y,2) for y in diff]
-    #diff_n = [round(y,2) for y in diff_n]
-
-    #pct = str(100 - pct_score)[:4] + "%"
-    #pct_n = str(100 - pct_score_n)[:4] + "%"
-    #pct_c = str(100 - pct_score_clip)[:4] + "%"
-    #pct_c_n = str(100 - pct_score_clip_n)[:4] + "%"
-    #pct_z = str(100 - score_z)[:4] + "%"
-    #pct_log = str(100 - score_log)[:4] + "%"
 
     return render_template("./index.html", 
         c1=c1,e1=e1, c2=c2,e2=e2, c3=c3,e3=e3, 
@@ -234,11 +249,113 @@ def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
         values=values, score=score, pct_score=pct_score,
         actual=actual, predicted=predicted, live=live, 
         pr_eq=predicted_equation, pr_eq_formatted=format_readable_eq(predicted_equation),
-        #pct_score=pct_score, pct_score_n=pct_score_n, pct=pct,pct_n=pct_n, 
-        #pct_score_clip=pct_score_clip, pct_score_clip_n=pct_score_clip_n, pct_c=pct_c, pct_c_n=pct_c_n,
-        #score_z=score_z,pct_z=pct_z, score_log=score_log, pct_log=pct_log,
-        #score_sig=score_sig, pct_sig=pct_sig
-        )
+        full_plot=full_plot, samples=max_samples*100)
+
+
+
+def control_animation_lm(i):
+    global lines
+    _animate_actual(i, lines[0])
+    _animate_low_mem(i, lines[1])
+    return lines
+
+def control_animation(i):
+    global lines
+    _animate_actual(i, lines[0])
+    _animate_predicted(i, lines[1])
+    _animate_live_learning(i, lines[2], lines[3])
+    return lines
+
+def animate_all(i):
+    global lines, live_xs, live_ys, score_ys, low_memory
+    xs = np.arange(0, domain*i/100, global_step)
+    xs -= domain/2
+
+    ##-----ACTUAL
+    ys = [eq(x) for x in xs]
+    lines[0].set_data(xs, ys)
+
+    if low_memory:
+        ##-----PRED_LM
+        ys = sr._program.execute(xs.reshape(-1,1))
+        lines[1].set_data(xs, ys)
+    else:
+        idx = prog_idx(i)
+        ##-----PREDICTED
+        xs = np.arange(0, domain, global_step)
+        xs -= domain/2
+        ys = get_ng_best(idx, xs)
+        lines[1].set_data(xs, ys)
+
+        ##-----LIVE
+        xs = np.arange(domain*(i-1)/100, domain*i/100, global_step)
+        xs -= domain/2
+        live_xs.extend(xs)
+        live_ys.extend( get_ng_best(idx, xs) )
+        lines[2].set_data(live_xs, live_ys)
+
+        ##-----SCORE
+        score_ys.extend( np.full(len(xs), get_capped_score(idx)) )
+        lines[3].set_data(live_xs, score_ys)
+
+    return lines
+
+
+
+def _animate_blank(i, line):
+    line.set_data([], [])
+    return (line,)
+
+def _animate_actual(i, line):
+    xs = np.arange(0, domain*i/100, global_step)
+    xs -= domain/2
+    ys = [eq(x) for x in xs]
+
+    line.set_data(xs, ys)
+    return (line,)
+
+def _animate_low_mem(i, line):
+    if line_ready(i):
+        xs = np.arange(0, domain*i/100, global_step)
+        xs -= domain/2
+        ys = sr._program.execute(xs.reshape(-1,1))
+
+        line.set_data(xs, ys)
+    return (line,)
+
+def _animate_predicted(i, line):
+    if line_ready(i):
+        xs = np.arange(0, domain, global_step)
+        xs -= domain/2
+        idx = prog_idx(i)
+
+        ys = get_ng_best(idx, xs)
+
+        line.set_data(xs, ys)
+    return (line,)
+
+def _animate_live_learning(i, line, line_s=None):
+    global live_xs, live_ys, score_ys
+
+    if line_ready(i):
+        xs = np.arange(domain*(i-1)/100, domain*i/100, global_step)
+        xs -= domain/2
+        live_xs.extend(xs)
+        idx = prog_idx(i)
+
+        if line_s != None:
+            score_ys.extend( np.full(len(xs), get_capped_score(idx)) )
+            line_s.set_data(live_xs, score_ys)
+
+        live_ys.extend( get_ng_best(idx, xs) )
+        line.set_data(live_xs, live_ys)
+    return (line,)
+
+
+
+
+
+
 
 
 def format_readable_eq(eq):
@@ -311,7 +428,7 @@ def animate_blank(i):
 def animate_actual(i):
     global line
     line.set_color(acutal_color)
-    
+
     xs = np.arange(0, domain*i/100, global_step)
     xs -= domain/2
     ys = [eq(x) for x in xs]
@@ -390,9 +507,9 @@ def get_ng_best(idx, exec_on):
     return best_fit
 
 def get_capped_score(idx):
-    fitness_set = np.array([((prg and abs(prg.fitness_)<9.5 and abs(prg.fitness_)) or 9.5) for prg in sr._programs[idx]])
-    best_fit = np.min(fitness_set)
-    print(fitness_set);
+    fitness_set = np.array([((prg and abs(prg.fitness_)<10 and abs(prg.fitness_)) or 10) for prg in sr._programs[idx]])
+    best_fit = np.min(fitness_set)*10
+    #print(fitness_set);
     return best_fit
 
 
