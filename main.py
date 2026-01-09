@@ -270,16 +270,25 @@ def create_figure():
 ### REGRESSOR PARAMETERS ###
 ############################
 
-p_crossover = 0.8
-p_subtree_mutation = 0.03
-p_hoist_mutation = 0.03
-p_point_mutation = 0.02
-p_point_replace = 0.05
-parsimony_coefficient = 0.005
-max_samples = 0.6
-pop_size = 150
-gen_amt = 20
-tournament_size = 10
+# Genetic operators - carefully tuned for better exploration/exploitation
+p_crossover = 0.7  # Reduced slightly to allow more mutation
+p_subtree_mutation = 0.1  # Increased for better exploration
+p_hoist_mutation = 0.05  # Increased for simplification
+p_point_mutation = 0.1  # Increased for fine-tuning
+p_point_replace = 0.05  # Keep constant mutation moderate
+
+# Complexity control
+parsimony_coefficient = 0.001  # Reduced to allow more complex solutions when needed
+init_depth = (2, 6)  # Min and max depth for initial population
+
+# Population and evolution
+pop_size = 300  # Increased for better diversity
+gen_amt = 30  # Increased for more evolution time
+tournament_size = 20  # Increased for stronger selection pressure
+
+# Training efficiency
+max_samples = 0.9  # Increased to use more training data
+stopping_criteria = 0.01  # Tighter stopping criteria for better accuracy
 
 
 #######################
@@ -297,8 +306,11 @@ def _protected_log(x):
 
 
 def _protected_div(x1, x2):
+    """Protected division that avoids divide by zero."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        return np.where(np.abs(x2) > 1e-10, x1 / x2, 0.0)
+        return np.where(
+            np.abs(x2) > 1e-6, x1 / x2, 1.0
+        )  # Return 1 instead of 0 for better gradients
 
 
 def _exp(x):
@@ -307,11 +319,14 @@ def _exp(x):
 
 
 def _pow(x1, x2):
+    """Protected power function with better overflow handling."""
     with np.errstate(over="ignore", invalid="ignore"):
-        # Protect against problematic cases
-        return np.where(
-            (np.abs(x1) < 100) & (np.abs(x2) < 10), np.power(np.abs(x1), x2), 0.0
-        )
+        # Protect against problematic cases and preserve sign when appropriate
+        abs_x1 = np.abs(x1)
+        # Clamp exponents to prevent overflow
+        x2_clamped = np.clip(x2, -5, 5)
+        result = np.where(abs_x1 < 50, np.power(abs_x1 + 1e-10, x2_clamped), 1.0)
+        return result
 
 
 # Create gplearn function objects
@@ -320,6 +335,7 @@ gplearn_exp = make_function(function=_exp, name="exp", arity=1)
 gplearn_sqrt = make_function(function=_protected_sqrt, name="sqrt", arity=1)
 gplearn_log = make_function(function=_protected_log, name="log", arity=1)
 gplearn_pow = make_function(function=_pow, name="pow", arity=2)
+gplearn_div = make_function(function=_protected_div, name="div", arity=2)
 
 # Mapping from detected function names to gplearn objects
 GPLEARN_FUNCTIONS = {
@@ -332,6 +348,7 @@ GPLEARN_FUNCTIONS = {
     "exp": gplearn_exp,
     "abs": "abs",
     "pow": gplearn_pow,
+    "div": gplearn_div,
 }
 
 
@@ -370,14 +387,14 @@ def create_regressor(function_set):
         population_size=pop_size,
         tournament_size=tournament_size,
         generations=gen_amt,
-        stopping_criteria=0.05,
+        stopping_criteria=stopping_criteria,
         p_crossover=p_crossover,
         p_subtree_mutation=p_subtree_mutation,
         p_hoist_mutation=p_hoist_mutation,
         p_point_mutation=p_point_mutation,
         p_point_replace=p_point_replace,
         metric=mae_no_wrap,
-        const_range=(-5.0, 5.0),
+        const_range=(-10.0, 10.0),  # Wider range for constants
         random_state=None,  # Allow randomness for variety
         parsimony_coefficient=parsimony_coefficient,
         function_set=function_set,
@@ -386,6 +403,9 @@ def create_regressor(function_set):
         max_samples=max_samples,
         n_jobs=-1,
         init_method="half and half",
+        init_depth=init_depth,  # Control initial tree depth (min, max)
+        verbose=0,  # Reduce logging overhead
+        warm_start=False,
     )
 
 
@@ -491,8 +511,8 @@ def train():
             # Detect which functions are used and build function set
             used_functions = detect_functions_in_equation(equation_str)
 
-            # Always include basic operations
-            function_set = ["add", "sub", "mul", "div"]
+            # Always include basic operations (using our protected div)
+            function_set = ["add", "sub", "mul", gplearn_div]
 
             # Add detected functions
             for func_name in used_functions:
