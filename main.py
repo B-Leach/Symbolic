@@ -18,12 +18,16 @@ from gplearn.fitness import make_fitness
 
 app = Flask(__name__)
 
+def eq(x):
+    return math.cos(c1*x)*e1 + math.sin(c2*x)*e2 * math.atan(c3*x)*e3
+
 
 
 ########################
 ### GLOBAL VARIABLES ###
 ########################
 
+domain = 20
 global_step = 0.0625
 
 c1 = 0.0
@@ -33,9 +37,10 @@ e2 = 0.0
 c3 = 0.0
 e3 = 0.0
 
-domain = 20
-
 low_memory = False
+
+x_train = np.arange(-domain/2, domain/2, global_step)
+y_actual = []
 
 predict_final = []
 live_xs = []
@@ -57,7 +62,7 @@ mpl.rcParams["animation.ffmpeg_path"] = "/usr/bin/ffmpeg"
 fig_one = Figure()
 fig_one, axs = plt.subplots(4, sharex=True)
 fig_one.suptitle('A tale of regression metrics')
-fig_one.set_facecolor('lightskyblue')
+fig_one.set_facecolor('lightgray')
 fig_one.set_figheight(8)
 axs[0].set_title("Actual")
 axs[1].set_title("Predicted")
@@ -82,21 +87,21 @@ for idx, ax in enumerate(axs):
 ### REGRESSOR PARAMETERS ###
 ############################
 
-                              #def  |  recc  |  old
-p_crossover = 0.8             #0.9      0.7     0.8
-p_subtree_mutation = 0.03     #0.01     0.1     0.02
-p_hoist_mutation = 0.03       #0.01     0.05    0.01
-p_point_mutation = 0.02       #0.01     0.1     0.12
+                              # def  |  recc  |  old
+p_crossover = 0.8             # 0.9      0.7     0.8
+p_subtree_mutation = 0.03     # 0.01     0.1     0.02
+p_hoist_mutation = 0.03       # 0.01     0.05    0.01
+p_point_mutation = 0.02       # 0.01     0.1     0.12
 
-p_point_replace = 0.05        #0.05             0.05
+p_point_replace = 0.05        # 0.05             0.05
 
-parsimony_coefficient = 0.005  #                0.005
+parsimony_coefficient = 0.005  #                 0.005
     
-max_samples = 0.6   #52.6
+max_samples = 0.6   #                            0.526
 
 ## 500 pop & 20 gen - cause timeout
-pop_size = 800                #1000     5000
-gen_amt = 10                  #20       40
+pop_size = 150                #1000     5000    800   1000
+gen_amt = 20                  #20       40      20     10
 tournament_size = 10          #5                20
 
 
@@ -132,7 +137,7 @@ sr = SymbolicRegressor(population_size=pop_size, tournament_size=tournament_size
                            generations=gen_amt, stopping_criteria=0.05,
                            p_crossover=p_crossover, p_subtree_mutation=p_subtree_mutation,
                            p_hoist_mutation=p_hoist_mutation, p_point_mutation=p_point_mutation,
-                           p_point_replace=p_point_replace, metric=mae_no_wrap, #"mse", "rmse" "mean absolute error"
+                           p_point_replace=p_point_replace, metric=mae_no_wrap,
                            const_range=(-5.,5.), random_state=1,
                            parsimony_coefficient=parsimony_coefficient, 
                            function_set=('add', 'mul', 'sin', 'cos', arctan), 
@@ -165,10 +170,9 @@ def index_blank():
         pr_eq=predicted_equation, pr_eq_formatted=predicted_equation,
         full_plot=full_plot, samples=max_samples*100)
 
-
 @app.route("/<values>")
 def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
-    global c1,e1,c2,e2,c3,e3,predict_final,low_memory
+    global c1,e1,c2,e2,c3,e3,low_memory,predict_final,live_xs,live_ys,score_ys,lines,y_actual
     v = values.split(":")
     c1 = float(v[0])
     e1 = float(v[1])
@@ -178,25 +182,29 @@ def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
     e3 = float(v[5])
     low_memory = bool(int(v[6]))
 
-    x_train = np.arange(-domain/2, domain/2, global_step)
+    predict_final = []
+    live_xs = []
+    live_ys = []
+    score_ys = []
+
+    for line in lines:
+        line.set_data([],[])
+
     y_actual = [eq(x) for x in x_train]
     sr.fit(x_train.reshape(-1,1), y_actual)
 
     predict_final = sr.predict(x_train.reshape(-1,1))
-    predicted_equation = sr._program
-
-    score = str( round(sr.score(x_train.reshape(-1,1), y_actual), 3) )
-    pct_score = str( round( 100-(_sigmoid(y_actual, predict_final)*100), 3) )
+    predicted_equation = format_readable_eq(sr._program)
 
     anim = animation.FuncAnimation(fig_one, animate_all, frames=100, interval=40, blit=True, repeat=False)
     full_plot = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
 
+    pct_score = str( round( 100-(_sigmoid(y_actual, predict_final)*100), 3) )
 
     return render_template("./index.html", 
         c1=c1,e1=e1, c2=c2,e2=e2, c3=c3,e3=e3, 
         low_mem=low_memory, ps=pop_size, ga=gen_amt, 
-        score=score, pct_score=pct_score,
-        pr_eq=predicted_equation, pr_eq_formatted=format_readable_eq(predicted_equation),
+        pct_score=pct_score, pr_eq_formatted=predicted_equation,
         full_plot=full_plot, samples=max_samples*100)
 
 
@@ -211,12 +219,17 @@ def animate_blank(i):
 
 def animate_all(i):
     global lines, live_xs, live_ys, score_ys, low_memory
-    xs = np.arange(0, domain*i/100, global_step)
-    xs -= domain/2
+    if i==0:
+        return lines
+
+    train_index = round(i/100*len(x_train))
+    train_index_begin = round((i-1)/100*len(x_train))
+
+    xs = x_train[:train_index]
+    print(prog_idx(i))
 
     ### ACTUAL ###
-    ys = [eq(x) for x in xs]
-    lines[0].set_data(xs, ys)
+    lines[0].set_data(xs, y_actual[:len(xs)])
 
     if low_memory:
         ### PREDICTED LOW MEM ###
@@ -226,20 +239,18 @@ def animate_all(i):
         idx = prog_idx(i)
 
         ### PREDICTED ###
-        xs = np.arange(0, domain, global_step)
-        xs -= domain/2
+        xs = x_train
         ys = get_ng_best(idx, xs)
         lines[1].set_data(xs, ys)
 
         ### LIVE ###
-        xs = np.arange(domain*(i-1)/100, domain*i/100, global_step)
-        xs -= domain/2
+        xs = x_train[train_index_begin:train_index]
         live_xs.extend(xs)
         live_ys.extend( get_ng_best(idx, xs) )
         lines[2].set_data(live_xs, live_ys)
 
         ### SCORE ###
-        score_ys.extend( np.full(len(xs), get_capped_score(idx)) )
+        score_ys.extend( np.full(len(xs), get_percent_score(idx)) )
         lines[3].set_data(live_xs, score_ys)
 
     return lines
@@ -250,14 +261,6 @@ def animate_all(i):
 ### HELPER FUNCTIONS ###
 #########################
 
-def line_ready(i):
-    global line
-    if (i==0):
-        line.set_data([], [])
-        return False
-    else:
-        return True
-
 def prog_idx(frame):
     return round((frame * (len(sr._programs)-1)) / 100)
 
@@ -267,10 +270,10 @@ def get_ng_best(idx, exec_on):
         length_of = len(best_fit) - len(exec_on)
         best_fit = best_fit[length_of:]
     else:
-        fitness_set = [((prg and abs(prg.raw_fitness_)) or 100) for prg in sr._programs[idx]]
-        best_fit_idx = fitness_set.index(min(fitness_set))
-        best_fit = sr._programs[idx][best_fit_idx]
-        best_fit = best_fit.execute(exec_on.reshape(-1,1))
+        fitness_set = [((prg and abs(prg.fitness_)) or 100) for prg in sr._programs[idx]]
+        best_prog_idx = fitness_set.index(min(fitness_set))
+        prog = sr._programs[idx][best_prog_idx]
+        best_fit = prog.execute(exec_on.reshape(-1,1))
     return best_fit
 
 def get_capped_score(idx):
@@ -278,6 +281,16 @@ def get_capped_score(idx):
     best_fit = np.min(fitness_set)*10
     return best_fit
 
+def get_percent_score(idx):
+    if idx == len(sr._programs):
+        score_out = str( round( 100-(_sigmoid(y_actual, predict_final)*100), 3) )
+    else:
+        fitness_set = [((prg and abs(prg.fitness_)) or 100) for prg in sr._programs[idx]]
+        best_prog_idx = fitness_set.index(min(fitness_set))
+        prog = sr._programs[idx][best_prog_idx]
+        best_fit = prog.execute(x_train.reshape(-1,1))
+        score_out = round( 100-(_sigmoid(y_actual, best_fit)*100), 3)
+    return score_out
 
 def format_readable_eq(eq):
     time.sleep(0.1)
@@ -330,9 +343,6 @@ def format_readable_eq(eq):
             return format_readable_eq(first_exp) + operator + format_readable_eq(second_exp)
 
     return operation
-
-def eq(x):
-    return math.cos(c1*x)*e1 + math.sin(c2*x)*e2 * math.atan(c3*x)*e3
 
 
 
