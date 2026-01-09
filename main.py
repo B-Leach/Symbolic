@@ -74,7 +74,7 @@ fig_one.set_figheight(8)
 axs[0].set_title("Actual")
 axs[1].set_title("Predicted")
 axs[2].set_title("Live")
-axs[3].set_title("R^2 Score of Determination")
+axs[3].set_title("R² Score")
 (line_act,) = axs[0].plot([], [], lw=2, color=acutal_color)
 (line_pred,) = axs[1].plot([], [], lw=2, color=predicted_color)
 (line_live,) = axs[2].plot([], [], lw=2, color=live_color)
@@ -83,7 +83,7 @@ lines = [line_act, line_pred, line_live, line_score]
 for idx, ax in enumerate(axs):
     ax.set_xlim(-domain / 2, domain / 2)
     if idx == len(axs) - 1:
-        ax.set_ylim(0, 100)
+        ax.set_ylim(0, 1)  # R² ranges from 0 to 1
     else:
         ax.set_ylim(-10, 10)
     ax.grid()
@@ -149,6 +149,25 @@ def _mae(y, y_pred, w=None):
 
 mae_no_wrap = make_fitness(function=_mae, greater_is_better=False, wrap=False)
 
+
+def calc_r2(y_actual, y_pred):
+    """Calculate R² (coefficient of determination).
+    Returns value between -inf and 1.0, where 1.0 is perfect fit.
+    """
+    y_actual = np.array(y_actual)
+    y_pred = np.array(y_pred)
+    ss_res = np.sum((y_actual - y_pred) ** 2)  # Residual sum of squares
+    ss_tot = np.sum((y_actual - np.mean(y_actual)) ** 2)  # Total sum of squares
+    if ss_tot == 0:
+        return 1.0 if ss_res == 0 else 0.0
+    return 1 - (ss_res / ss_tot)
+
+
+def calc_mae(y_actual, y_pred):
+    """Calculate Mean Absolute Error."""
+    return np.average(np.abs(np.array(y_pred) - np.array(y_actual)))
+
+
 # p_crossover, p_subtree_mutation, p_hoist_mutation and p_point_mutation should total to 1.0 or less
 sr = SymbolicRegressor(
     population_size=pop_size,
@@ -182,11 +201,7 @@ sr = SymbolicRegressor(
 def index_blank():
     global c1, e1, c2, e2, c3, e3, low_memory
     with _request_lock:
-        values = "0.0:0.0:0.0:0.0:0.0:0.0:0"
-        score = 0.0
-        pct_score = 0.0
         predicted_equation = "No prediction made yet..."
-        # full_plot = "No prediction made yet..."
 
         anim = animation.FuncAnimation(
             fig_one, animate_blank, frames=1, interval=40, blit=True, repeat=False
@@ -204,9 +219,8 @@ def index_blank():
             low_mem=low_memory,
             ps=pop_size,
             ga=gen_amt,
-            score=score,
-            pct_score=pct_score,
-            pr_eq=predicted_equation,
+            r2_score="N/A",
+            mae_score="N/A",
             pr_eq_formatted=predicted_equation,
             full_plot=full_plot,
             samples=max_samples * 100,
@@ -258,7 +272,8 @@ def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
         )
         full_plot = anim.to_html5_video().replace("\n", " ").replace("\r", "")
 
-        pct_score = str(round(100 - (_sigmoid(y_actual, predict_final) * 100), 3))
+        r2_score = round(calc_r2(y_actual, predict_final), 4)
+        mae_score = round(calc_mae(y_actual, predict_final), 4)
 
         return render_template(
             "./index.html",
@@ -271,7 +286,8 @@ def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
             low_mem=low_memory,
             ps=pop_size,
             ga=gen_amt,
-            pct_score=pct_score,
+            r2_score=r2_score,
+            mae_score=mae_score,
             pr_eq_formatted=predicted_equation,
             full_plot=full_plot,
             samples=max_samples * 100,
@@ -324,13 +340,15 @@ def train():
             )
             full_plot = anim.to_html5_video().replace("\n", " ").replace("\r", "")
 
-            pct_score = str(round(100 - (_sigmoid(y_actual, predict_final) * 100), 3))
+            r2_score = round(calc_r2(y_actual, predict_final), 4)
+            mae_score = round(calc_mae(y_actual, predict_final), 4)
 
             return jsonify(
                 {
                     "success": True,
                     "video_html": full_plot,
-                    "pct_score": pct_score,
+                    "r2_score": r2_score,
+                    "mae_score": mae_score,
                     "pr_eq_formatted": predicted_equation,
                 }
             )
@@ -380,7 +398,7 @@ def animate_all(i):
         lines[2].set_data(live_xs, live_ys)
 
         ### SCORE ###
-        score_ys.extend(np.full(len(xs), get_percent_score(idx)))
+        score_ys.extend(np.full(len(xs), get_r2_score(idx)))
         lines[3].set_data(live_xs, score_ys)
 
     return lines
@@ -421,9 +439,10 @@ def get_capped_score(idx):
     return best_fit
 
 
-def get_percent_score(idx):
+def get_r2_score(idx):
+    """Get R² score for the best program at a given generation index."""
     if idx >= len(sr._programs) - 1:
-        score_out = str(round(100 - (_sigmoid(y_actual, predict_final) * 100), 3))
+        return calc_r2(y_actual, predict_final)
     else:
         fitness_set = [
             ((prg and abs(prg.fitness_)) or 100) for prg in sr._programs[idx]
@@ -431,8 +450,7 @@ def get_percent_score(idx):
         best_prog_idx = fitness_set.index(min(fitness_set))
         prog = sr._programs[idx][best_prog_idx]
         best_fit = prog.execute(x_train.reshape(-1, 1))
-        score_out = round(100 - (_sigmoid(y_actual, best_fit) * 100), 3)
-    return score_out
+        return calc_r2(y_actual, best_fit)
 
 
 def format_readable_eq(eq):

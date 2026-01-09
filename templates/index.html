@@ -72,7 +72,8 @@
           </p>
           <br>
           <p><strong>Formatted Equation: </strong><span id="formatted_eq">{{pr_eq_formatted}}</span></p>
-          <p><strong>Percentage of Accuracy: </strong><span id="pct_score">{{pct_score}}</span>%</p>
+          <p><strong>R² Score: </strong><span id="r2_score">{{r2_score}}</span></p>
+          <p><strong>Mean Absolute Error: </strong><span id="mae_score">{{mae_score}}</span></p>
 
           <div class="about p-2 mt-4">
             <h4>About Symbolic Learning</h4>
@@ -179,7 +180,8 @@
           document.getElementById("hider").style.opacity = 0;
           if (data.success) {
             document.getElementById("full_plot").innerHTML = htmlDecode(data.video_html);
-            document.getElementById("pct_score").textContent = data.pct_score;
+            document.getElementById("r2_score").textContent = data.r2_score;
+            document.getElementById("mae_score").textContent = data.mae_score;
             document.getElementById("formatted_eq").textContent = data.pr_eq_formatted;
 
             // Set up the new video
