@@ -1,278 +1,688 @@
-import io
-import sys
-import random
+import ast
 import math
-import base64
-import html
-import time
-import numpy as np
-from flask import Flask, Response, render_template
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from matplotlib.figure import Figure
-from matplotlib import animation
-import matplotlib as mpl
+import operator
+import shutil
+import threading
 
-#from tensorflow import keras
-#from tensorflow.keras.models import Sequential
-#from tensorflow.keras.layers import Dense
-from gplearn.genetic import SymbolicRegressor
-from gplearn.functions import make_function
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+from flask import Flask, jsonify, render_template, request
 from gplearn.fitness import make_fitness
+from gplearn.functions import make_function
+from gplearn.genetic import SymbolicRegressor
+from matplotlib import animation
 
 app = Flask(__name__)
 
+# Lock to prevent concurrent requests from corrupting shared state
+_request_lock = threading.Lock()
 
-global_step = 0.0625
 
-c1 = 0.0
-e1 = 0.0
-c2 = 0.0
-e2 = 0.0
-c3 = 0.0
-e3 = 0.0
+########################
+### GLOBAL VARIABLES ###
+########################
 
 domain = 20
-domain = round(domain)
+global_step = 0.0625
+x_train = np.arange(-domain / 2, domain / 2, global_step)
 
-low_memory = False
-
-acutal_color = "orange"
-predicted_color = "blue"
-live_color = "green"
-
-
-mpl.rcParams["animation.ffmpeg_path"] = "/usr/bin/ffmpeg"
-fig = Figure(facecolor='lightskyblue', alpha=0.5)
-axis = fig.add_subplot(1,1,1)
-axis.set_xlim(-domain/2,domain/2)
-axis.set_ylim(-10,10)
-line, = axis.plot([], [], lw=2)
-line2, = axis.plot([], [], lw=1)
-
+# State variables
+y_actual = []
 predict_final = []
-live_xs = []
-live_ys = []
-score_ys = []
+current_equation = ""
 
-p_crossover = 0.8             #0.9     0.7     0.8
-p_subtree_mutation = 0.03     #0.01     0.1     0.02
-p_hoist_mutation = 0.03       #0.01     0.05    0.01
-p_point_mutation = 0.02       #0.01     0.1     0.12
 
-p_point_replace = 0.05        #0.05             0.05
+#############################
+### SAFE EQUATION PARSER ###
+#############################
 
-parsimony_coefficient = 0.005  #                 0.005
+# Supported functions for user input
+SAFE_FUNCTIONS = {
+    "sin": np.sin,
+    "cos": np.cos,
+    "tan": np.tan,
+    "arctan": np.arctan,
+    "atan": np.arctan,  # alias
+    "sqrt": np.sqrt,
+    "log": np.log,
+    "ln": np.log,  # alias
+    "exp": np.exp,
+    "abs": np.abs,
+}
 
-max_samples = 0.6
+# Operators
+SAFE_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
 
-## 500 pop & 20 gen - cause timeout
-pop_size = 800                #1000     5000
-gen_amt = 20                  #20       40
-tournament_size = 10          #5                20
 
-def _power(x1, x2):
-    with np.errstate(over='ignore'):
-        return np.where(( (x1 < 100) & (x2 < 20) ), np.power(x1, x2), 0.)
-power = make_function(function=_power, name='pow', arity=2)
-arctan = make_function(function=np.arctan, name='arctan', arity=1)
+class SafeEquationEvaluator(ast.NodeVisitor):
+    """Safely evaluate mathematical expressions using AST parsing."""
 
-def _mape(y, y_pred, w=None):
-    y_a = np.array(y)
-    y_pred = np.array(y_pred)
-    return np.average(np.abs( y_pred - y_a )/y_a, weights=w) * 100
-mape = make_fitness(function=_mape, greater_is_better=False, wrap=False)
+    def __init__(self, x_value):
+        self.x_value = x_value
 
-def _sigmoid(y, y_pred, w=None):
-    y_actual = np.array(y)
-    y_pred = np.array(y_pred)
-    diff = np.abs( y_pred - y_actual )
-    sig = (2/(1+np.power(math.e, -diff)))-1
-    return (np.average( sig , weights=w))
-sigmoid = make_fitness(function=_sigmoid, greater_is_better=False, wrap=False)
+    def visit_Constant(self, node):
+        return node.value
+
+    def visit_Num(self, node):  # Python 3.7 compatibility
+        return node.n
+
+    def visit_Name(self, node):
+        if node.id.lower() == "x":
+            return self.x_value
+        elif node.id.lower() == "e":
+            return math.e
+        elif node.id.lower() == "pi":
+            return math.pi
+        else:
+            raise ValueError(f"Unknown variable: {node.id}. Use 'x' as the variable.")
+
+    def visit_BinOp(self, node):
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        op_type = type(node.op)
+        if op_type not in SAFE_OPERATORS:
+            raise ValueError(f"Unsupported operator: {op_type.__name__}")
+        return SAFE_OPERATORS[op_type](left, right)
+
+    def visit_UnaryOp(self, node):
+        operand = self.visit(node.operand)
+        op_type = type(node.op)
+        if op_type not in SAFE_OPERATORS:
+            raise ValueError(f"Unsupported unary operator: {op_type.__name__}")
+        return SAFE_OPERATORS[op_type](operand)
+
+    def visit_Call(self, node):
+        if not isinstance(node.func, ast.Name):
+            raise ValueError("Only simple function calls are supported")
+
+        func_name = node.func.id.lower()
+        if func_name not in SAFE_FUNCTIONS:
+            raise ValueError(
+                f"Unknown function: {func_name}. Supported: {', '.join(SAFE_FUNCTIONS.keys())}"
+            )
+
+        if len(node.args) != 1:
+            raise ValueError(f"Function {func_name} requires exactly 1 argument")
+
+        arg = self.visit(node.args[0])
+        return SAFE_FUNCTIONS[func_name](arg)
+
+    def visit_Expression(self, node):
+        return self.visit(node.body)
+
+    def generic_visit(self, node):
+        raise ValueError(f"Unsupported syntax: {type(node).__name__}")
+
+
+def parse_equation(equation_str, x_values):
+    """
+    Safely parse and evaluate a mathematical equation.
+
+    Args:
+        equation_str: String like "2*sin(3*x) + cos(x)"
+        x_values: numpy array of x values
+
+    Returns:
+        numpy array of y values
+
+    Raises:
+        ValueError: If equation is invalid or contains unsafe operations
+    """
+    # Clean up the equation string
+    equation_str = equation_str.strip()
+    if not equation_str:
+        raise ValueError("Equation cannot be empty")
+
+    # Replace common notations
+    equation_str = equation_str.replace("^", "**")  # Allow ^ for power
+
+    try:
+        tree = ast.parse(equation_str, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid equation syntax: {e}")
+
+    # Evaluate for each x value
+    results = []
+    for x in x_values:
+        try:
+            evaluator = SafeEquationEvaluator(x)
+            result = evaluator.visit(tree)
+            results.append(float(result))
+        except Exception as e:
+            raise ValueError(f"Error evaluating equation at x={x}: {e}")
+
+    return np.array(results)
+
+
+def detect_functions_in_equation(equation_str):
+    """Detect which mathematical functions are used in the equation."""
+    equation_lower = equation_str.lower()
+    used_functions = set()
+
+    # Check for each function
+    function_mapping = {
+        "sin": "sin",
+        "cos": "cos",
+        "tan": "tan",
+        "arctan": "arctan",
+        "atan": "arctan",
+        "sqrt": "sqrt",
+        "log": "log",
+        "ln": "log",
+        "exp": "exp",
+        "abs": "abs",
+    }
+
+    for func_name, gplearn_name in function_mapping.items():
+        if func_name + "(" in equation_lower:
+            used_functions.add(gplearn_name)
+
+    # Check for power operator - parse AST to detect Pow nodes
+    try:
+        # Replace ^ with ** for parsing
+        eq_normalized = equation_str.replace("^", "**")
+        tree = ast.parse(eq_normalized, mode="eval")
+
+        # Walk the AST to find Pow operations
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                used_functions.add("pow")
+                break
+    except:
+        # Fallback to simple string check
+        if "**" in equation_str or "^" in equation_str:
+            used_functions.add("pow")
+
+    return used_functions
+
+
+#############################
+### GRAPH INITIALIZATION ###
+#############################
+
+actual_color = "#ff9500"  # Orange
+predicted_color = "#007aff"  # Blue
+live_color = "#34c759"  # Green
+score_color = "#ff3b30"  # Red
+
+# Configure FFmpeg for h264 encoding (browser compatible)
+_ffmpeg_path = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+mpl.rcParams["animation.ffmpeg_path"] = _ffmpeg_path
+mpl.rcParams["animation.codec"] = "h264"
+
+# Use a non-interactive backend
+mpl.use("Agg")
+
+
+def create_figure():
+    """Create a fresh figure for each animation to avoid state issues."""
+    fig, axs = plt.subplots(4, sharex=True, figsize=(12, 14))  # Increased size
+    fig.suptitle(
+        "Symbolic Regression Learning Progress",
+        fontsize=16,
+        fontweight="bold",
+        color="#ffffff",
+    )
+    fig.set_facecolor("#0f0f0f")  # Match website dark background
+
+    axs[0].set_title("Target Function", fontsize=11, color="#a0a0a0")
+    axs[1].set_title("Best Predicted Function", fontsize=11, color="#a0a0a0")
+    axs[2].set_title("Live Prediction", fontsize=11, color="#a0a0a0")
+    axs[3].set_title("R² Score (0 = poor, 1 = perfect)", fontsize=11, color="#a0a0a0")
+
+    (line_act,) = axs[0].plot([], [], lw=2.5, color=actual_color)
+    (line_pred,) = axs[1].plot([], [], lw=2.5, color=predicted_color)
+    (line_live,) = axs[2].plot([], [], lw=2.5, color=live_color)
+    (line_score,) = axs[3].plot([], [], lw=2.5, color=score_color)
+
+    lines = [line_act, line_pred, line_live, line_score]
+
+    for idx, ax in enumerate(axs):
+        ax.set_xlim(-domain / 2, domain / 2)
+        if idx == 3:  # R² score graph
+            ax.set_ylim(-0.1, 1.1)
+        else:
+            ax.set_ylim(-10, 10)
+        ax.grid(True, alpha=0.2, color="#333333", linestyle="-", linewidth=0.5)
+        ax.set_facecolor("#1a1a1a")  # Dark background for plots
+        # Style the axes
+        ax.spines["bottom"].set_color("#333333")
+        ax.spines["top"].set_color("#333333")
+        ax.spines["left"].set_color("#333333")
+        ax.spines["right"].set_color("#333333")
+        ax.tick_params(axis="x", colors="#666666")
+        ax.tick_params(axis="y", colors="#666666")
+
+    plt.tight_layout()
+    return fig, axs, lines
+
+
+############################
+### REGRESSOR PARAMETERS ###
+############################
+
+# Genetic operators - carefully tuned for better exploration/exploitation
+p_crossover = 0.7  # Reduced slightly to allow more mutation
+p_subtree_mutation = 0.1  # Increased for better exploration
+p_hoist_mutation = 0.05  # Increased for simplification
+p_point_mutation = 0.1  # Increased for fine-tuning
+p_point_replace = 0.05  # Keep constant mutation moderate
+
+# Complexity control
+parsimony_coefficient = 0.001  # Reduced to allow more complex solutions when needed
+init_depth = (2, 6)  # Min and max depth for initial population
+
+# Population and evolution
+pop_size = 300  # Increased for better diversity
+gen_amt = 30  # Increased for more evolution time
+tournament_size = 20  # Increased for stronger selection pressure
+
+# Training efficiency
+max_samples = 0.9  # Increased to use more training data
+stopping_criteria = 0.01  # Tighter stopping criteria for better accuracy
+
+
+#######################
+### CUSTOM FUNCTIONS ###
+#######################
+
+
+# Custom functions for gplearn
+def _protected_sqrt(x):
+    return np.sqrt(np.abs(x))
+
+
+def _protected_log(x):
+    return np.log(np.abs(x) + 1e-10)
+
+
+def _protected_div(x1, x2):
+    """Protected division that avoids divide by zero."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(
+            np.abs(x2) > 1e-6, x1 / x2, 1.0
+        )  # Return 1 instead of 0 for better gradients
+
+
+def _exp(x):
+    with np.errstate(over="ignore"):
+        return np.where(x < 100, np.exp(x), np.exp(100))
+
+
+def _pow(x1, x2):
+    """Protected power function with better overflow handling."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        # Protect against problematic cases and preserve sign when appropriate
+        abs_x1 = np.abs(x1)
+        # Clamp exponents to prevent overflow
+        x2_clamped = np.clip(x2, -5, 5)
+        result = np.where(abs_x1 < 50, np.power(abs_x1 + 1e-10, x2_clamped), 1.0)
+        return result
+
+
+# Create gplearn function objects
+gplearn_arctan = make_function(function=np.arctan, name="arctan", arity=1)
+gplearn_exp = make_function(function=_exp, name="exp", arity=1)
+gplearn_sqrt = make_function(function=_protected_sqrt, name="sqrt", arity=1)
+gplearn_log = make_function(function=_protected_log, name="log", arity=1)
+gplearn_pow = make_function(function=_pow, name="pow", arity=2)
+gplearn_div = make_function(function=_protected_div, name="div", arity=2)
+
+# Mapping from detected function names to gplearn objects
+GPLEARN_FUNCTIONS = {
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "arctan": gplearn_arctan,
+    "sqrt": gplearn_sqrt,
+    "log": gplearn_log,
+    "exp": gplearn_exp,
+    "abs": "abs",
+    "pow": gplearn_pow,
+    "div": gplearn_div,
+}
+
+
+#######################
+### SCORING METRICS ###
+#######################
+
 
 def _mae(y, y_pred, w=None):
     return np.average(np.abs(y_pred - y), weights=w)
+
+
 mae_no_wrap = make_fitness(function=_mae, greater_is_better=False, wrap=False)
 
-#p_crossover, p_subtree_mutation, p_hoist_mutation and p_point_mutation should total to 1.0 or less
-sr = SymbolicRegressor(population_size=pop_size, tournament_size=tournament_size,
-                           generations=gen_amt, stopping_criteria=0.05,
-                           p_crossover=p_crossover, p_subtree_mutation=p_subtree_mutation,
-                           p_hoist_mutation=p_hoist_mutation, p_point_mutation=p_point_mutation,
-                           p_point_replace=p_point_replace, metric=mae_no_wrap, #"mse", "rmse" "mean absolute error"
-                           const_range=(-5.,5.), random_state=1,
-                           parsimony_coefficient=parsimony_coefficient, 
-                           function_set=('add', 'mul', 'sin', 'cos', arctan), 
-                           low_memory=low_memory, feature_names=["X"],
-                           max_samples=max_samples, n_jobs=-1,
-                           init_method="half and half")
+
+def calc_r2(y_actual, y_pred):
+    """Calculate R² (coefficient of determination)."""
+    y_actual = np.array(y_actual)
+    y_pred = np.array(y_pred)
+    ss_res = np.sum((y_actual - y_pred) ** 2)
+    ss_tot = np.sum((y_actual - np.mean(y_actual)) ** 2)
+    if ss_tot == 0:
+        return 1.0 if ss_res == 0 else 0.0
+    r2 = 1 - (ss_res / ss_tot)
+    return max(0.0, min(1.0, r2))
+
+
+def calc_mae(y_actual, y_pred):
+    """Calculate Mean Absolute Error."""
+    return np.average(np.abs(np.array(y_pred) - np.array(y_actual)))
+
+
+def create_regressor(function_set):
+    """Create a new SymbolicRegressor with the specified function set."""
+    return SymbolicRegressor(
+        population_size=pop_size,
+        tournament_size=tournament_size,
+        generations=gen_amt,
+        stopping_criteria=stopping_criteria,
+        p_crossover=p_crossover,
+        p_subtree_mutation=p_subtree_mutation,
+        p_hoist_mutation=p_hoist_mutation,
+        p_point_mutation=p_point_mutation,
+        p_point_replace=p_point_replace,
+        metric=mae_no_wrap,
+        const_range=(-10.0, 10.0),  # Wider range for constants
+        random_state=None,  # Allow randomness for variety
+        parsimony_coefficient=parsimony_coefficient,
+        function_set=function_set,
+        low_memory=False,
+        feature_names=["x"],
+        max_samples=max_samples,
+        n_jobs=-1,
+        init_method="half and half",
+        init_depth=init_depth,  # Control initial tree depth (min, max)
+        verbose=0,  # Reduce logging overhead
+        warm_start=False,
+    )
+
+
+##################
+### APP ROUTES ###
+##################
+
+DEFAULT_EQUATION = "2*sin(x) + cos(2*x)"
 
 
 @app.route("/")
 def index_blank():
-    print("Blank models requested...")
-    global c1,e1,c2,e2,c3,e3,low_memory
-    values="0.0:0.0:0.0:0.0:0.0:0.0:0"
-    score = 0.0
-    #v = values.split(":")
-    #c1 = float(v[0])
-    #e1 = float(v[1])
-    #c2 = float(v[2])
-    #e2 = float(v[3])
-    #c3 = float(v[4])
-    #e3 = float(v[5])
-    #low_memory = bool(v[6])
+    with _request_lock:
+        # Create fresh figure
+        fig, axs, lines = create_figure()
 
-    fig.suptitle('Actual Plot', fontsize=20)
-    anim = animation.FuncAnimation(fig, animate_blank, frames=2, interval=40, blit=True, repeat=False)
-    actual = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
+        def animate_blank(i):
+            return lines
 
-    fig.suptitle('Predicted Plot', fontsize=20)
-    anim = animation.FuncAnimation(fig, animate_blank, frames=2, interval=40, blit=True, repeat=False)
-    predicted = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
+        anim = animation.FuncAnimation(
+            fig, animate_blank, frames=1, interval=40, blit=True, repeat=False
+        )
 
-    live = "Live plot not available in Low Memory Mode."
-    if not low_memory:
-        fig.suptitle('Live Plot', fontsize=20)
-        anim = animation.FuncAnimation(fig, animate_blank, frames=2, interval=40, blit=True, repeat=False)
-        live = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
+        full_plot = anim.to_html5_video()
+        plt.close(fig)
 
-    predicted_equation = "No prediction made yet..."
-
-    return render_template("./index.html", 
-        c1=c1,e1=e1, c2=c2,e2=e2, c3=c3,e3=e3, 
-        low_mem=low_memory, ps=pop_size, ga=gen_amt, 
-        values=values, score=score,
-        actual=actual, predicted=predicted, live=live, 
-        pr_eq=predicted_equation)
-
-
-@app.route("/<values>")
-def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
-    #print("Calculated models requested...")
-    global c1,e1,c2,e2,c3,e3,predict_final,low_memory
-    v = values.split(":")
-    c1 = float(v[0])
-    e1 = float(v[1])
-    c2 = float(v[2])
-    e2 = float(v[3])
-    c3 = float(v[4])
-    e3 = float(v[5])
-    low_memory = bool(int(v[6]))
-
-    fig.suptitle('Actual Plot', fontsize=20)
-    anim = animation.FuncAnimation(fig, animate_actual, frames=100, interval=40, blit=True, repeat=False)
-    actual = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
-    #print("Actual graph is plotted.")
-
-    x_train = np.arange(-domain/2, domain/2, global_step)
-    y_train = [eq(x) for x in x_train]
-    sr.fit(x_train.reshape(-1,1), y_train)
-    #print("Model is trained.")
-
-    #x_temp = np.arange(-domain/2, domain/2, global_step)
-    predict_final = sr.predict(x_train.reshape(-1,1))
-    #print("Prediction is made.")
-
-    y_actual = [eq(x) for x in x_train]
-    score = str( round(sr.score(x_train.reshape(-1,1), y_actual), 3) )
-    #score = str(_mape(y_actual, predict_final))[:6]
-    pct_score = str( round( 100-(_sigmoid(y_actual, predict_final)*100), 3) )
-    #print("Score is calculated.")
-
-    fig.suptitle('Predicted Plot', fontsize=20)
-    if low_memory:
-        anim = animation.FuncAnimation(fig, animate_low_mem, frames=100, interval=40, blit=True, repeat=False)
-    else:
-        anim = animation.FuncAnimation(fig, animate_predicted, frames=100, interval=40, blit=True, repeat=False)
-    predicted = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
-    #print("Prediction graph is plotted.")
-
-    live = "Live plot not available in Low Memory Mode."
-    if not low_memory:
-        fig.suptitle('Live Plot', fontsize=20)
-        anim = animation.FuncAnimation(fig, animate_live_learning, frames=100, interval=40, blit=True, repeat=False)
-        live = anim.to_html5_video().replace('\n', ' ').replace('\r', '')
-        #print("Live graph is ploted.")
-
-    predicted_equation = sr._program
-
-    #diff = np.abs(np.array(y_actual) - np.array(predict_final))
-    #diff/=np.abs(y_actual)
-    #pct_score=np.average(diff)*100
-
-    #diff_sig = np.array([(2/(1+np.power(math.e, -y)))-1 for y in diff])
-    #score_sig = np.average(diff_sig)*100
-    #pct_sig = str(100 - score_sig)[:4] + "%"
-
-    #diff_z = (diff - np.mean(diff)) / np.std(diff)
-    #score_z = np.average(diff_z)*100
-
-    #diff_log = np.array([np.log(y) for y in diff])
-    #score_log = np.average(diff_log)*100
-
-    #diff_clip = np.array([(y<domain/2 and y>-domain/2 and y) or (y>0 and domain/2) or (y<0 and -domain/2) for y in diff])
-    #pct_score_clip = np.average(diff_clip)*100
-    #pct_score_clip_n = np.average(diff_clip/domain/2)*100
-
-    #diff_n = diff/diff.max()
-    #pct_score_n=np.average(diff_n)*100
-
-    #diff = [round(y,2) for y in diff]
-    #diff_n = [round(y,2) for y in diff_n]
-
-    #pct = str(100 - pct_score)[:4] + "%"
-    #pct_n = str(100 - pct_score_n)[:4] + "%"
-    #pct_c = str(100 - pct_score_clip)[:4] + "%"
-    #pct_c_n = str(100 - pct_score_clip_n)[:4] + "%"
-    #pct_z = str(100 - score_z)[:4] + "%"
-    #pct_log = str(100 - score_log)[:4] + "%"
-
-    return render_template("./index.html", 
-        c1=c1,e1=e1, c2=c2,e2=e2, c3=c3,e3=e3, 
-        low_mem=low_memory, ps=pop_size, ga=gen_amt, 
-        values=values, score=score, pct_score=pct_score,
-        actual=actual, predicted=predicted, live=live, 
-        pr_eq=predicted_equation, pr_eq_formatted=format_readable_eq(predicted_equation),
-        #pct_score=pct_score, pct_score_n=pct_score_n, pct=pct,pct_n=pct_n, 
-        #pct_score_clip=pct_score_clip, pct_score_clip_n=pct_score_clip_n, pct_c=pct_c, pct_c_n=pct_c_n,
-        #score_z=score_z,pct_z=pct_z, score_log=score_log, pct_log=pct_log,
-        #score_sig=score_sig, pct_sig=pct_sig
+        return render_template(
+            "./index.html",
+            equation=DEFAULT_EQUATION,
+            ps=pop_size,
+            ga=gen_amt,
+            r2_score="N/A",
+            mae_score="N/A",
+            pr_eq_formatted="No prediction made yet...",
+            full_plot=full_plot,
+            samples=max_samples * 100,
         )
 
 
+@app.route("/validate", methods=["POST"])
+def validate():
+    """Validate an equation without training."""
+    try:
+        data = request.get_json()
+        equation_str = data.get("equation", "").strip()
+
+        if not equation_str:
+            return jsonify({"valid": False, "error": "Please enter an equation"}), 400
+
+        # Try to parse the equation
+        try:
+            y_test = parse_equation(
+                equation_str, x_train[:10]
+            )  # Test with small subset
+        except ValueError as e:
+            return jsonify({"valid": False, "error": str(e)}), 400
+
+        # Check for NaN or Inf values
+        if np.any(np.isnan(y_test)) or np.any(np.isinf(y_test)):
+            return jsonify(
+                {
+                    "valid": False,
+                    "error": "Equation produces invalid values (NaN or Infinity)",
+                }
+            ), 400
+
+        return jsonify({"valid": True, "message": "Equation is valid"})
+    except Exception as e:
+        return jsonify({"valid": False, "error": str(e)}), 400
+
+
+@app.route("/train", methods=["POST"])
+def train():
+    global y_actual, predict_final, current_equation
+
+    with _request_lock:
+        try:
+            data = request.get_json()
+            equation_str = data.get("equation", "").strip()
+
+            if not equation_str:
+                return jsonify(
+                    {"success": False, "error": "Please enter an equation"}
+                ), 400
+
+            current_equation = equation_str
+
+            # Parse and evaluate the equation
+            try:
+                y_actual = parse_equation(equation_str, x_train)
+            except ValueError as e:
+                return jsonify({"success": False, "error": str(e)}), 400
+
+            # Check for NaN or Inf values
+            if np.any(np.isnan(y_actual)) or np.any(np.isinf(y_actual)):
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "Equation produces invalid values (NaN or Infinity) in the range x = [-10, 10]",
+                    }
+                ), 400
+
+            # Detect which functions are used and build function set
+            used_functions = detect_functions_in_equation(equation_str)
+
+            # Always include basic operations (using our protected div)
+            function_set = ["add", "sub", "mul", gplearn_div]
+
+            # Add detected functions
+            for func_name in used_functions:
+                if func_name in GPLEARN_FUNCTIONS:
+                    func = GPLEARN_FUNCTIONS[func_name]
+                    if func not in function_set:
+                        function_set.append(func)
+
+            # Create regressor with appropriate function set
+            sr = create_regressor(tuple(function_set))
+
+            # Train the model
+            sr.fit(x_train.reshape(-1, 1), y_actual)
+
+            # Check if training succeeded
+            if sr._program is None:
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "Training failed to converge. Try a simpler equation or different parameters.",
+                    }
+                ), 400
+
+            predict_final = sr.predict(x_train.reshape(-1, 1))
+            predicted_equation = format_readable_eq(sr._program)
+
+            # Create animation
+            fig, axs, lines = create_figure()
+
+            # Adjust y-axis based on data range
+            y_min, y_max = np.min(y_actual), np.max(y_actual)
+            y_range = y_max - y_min
+            y_padding = max(y_range * 0.1, 1)
+            for ax in axs[:3]:
+                ax.set_ylim(y_min - y_padding, y_max + y_padding)
+
+            # Animation state
+            live_xs_local = []
+            live_ys_local = []
+            score_ys_local = []
+
+            num_frames = 50
+
+            def animate_all(i):
+                if i == 0:
+                    return lines
+
+                train_index = round(i / num_frames * len(x_train))
+                train_index_begin = round((i - 1) / num_frames * len(x_train))
+
+                xs = x_train[:train_index]
+                lines[0].set_data(xs, y_actual[: len(xs)])
+
+                if len(sr._programs) == 0:
+                    if sr._program is not None:
+                        ys = sr._program.execute(xs.reshape(-1, 1))
+                        lines[1].set_data(xs, ys)
+                    else:
+                        lines[1].set_data(xs, np.zeros_like(xs))
+                else:
+                    idx = round((i * (len(sr._programs) - 1)) / num_frames)
+                    idx = min(idx, len(sr._programs) - 1)
+
+                    if idx >= len(sr._programs) - 1:
+                        ys = predict_final
+                    else:
+                        fitness_set = [
+                            ((prg and abs(prg.fitness_)) or 100)
+                            for prg in sr._programs[idx]
+                        ]
+                        best_prog_idx = fitness_set.index(min(fitness_set))
+                        prog = sr._programs[idx][best_prog_idx]
+                        if prog is not None:
+                            ys = prog.execute(x_train.reshape(-1, 1))
+                        else:
+                            ys = predict_final
+                    lines[1].set_data(x_train, ys)
+
+                    xs_slice = x_train[train_index_begin:train_index]
+                    if len(xs_slice) > 0:
+                        if idx >= len(sr._programs) - 1:
+                            ys_slice = predict_final[train_index_begin:train_index]
+                        else:
+                            ys_slice = ys[train_index_begin:train_index]
+                        live_xs_local.extend(xs_slice)
+                        live_ys_local.extend(ys_slice)
+                    lines[2].set_data(live_xs_local, live_ys_local)
+
+                    r2 = calc_r2(y_actual, ys)
+                    score_ys_local.extend(np.full(max(1, len(xs_slice)), r2))
+                    if len(live_xs_local) == len(score_ys_local):
+                        lines[3].set_data(live_xs_local, score_ys_local)
+
+                return lines
+
+            anim = animation.FuncAnimation(
+                fig,
+                animate_all,
+                frames=num_frames,
+                interval=40,
+                blit=True,
+                repeat=False,
+            )
+
+            full_plot = anim.to_html5_video()
+            plt.close(fig)
+
+            r2_score = round(calc_r2(y_actual, predict_final), 4)
+            mae_score = round(calc_mae(y_actual, predict_final), 4)
+
+            return jsonify(
+                {
+                    "success": True,
+                    "video_html": full_plot,
+                    "r2_score": r2_score,
+                    "mae_score": mae_score,
+                    "pr_eq_formatted": predicted_equation,
+                    "target_equation": equation_str,
+                }
+            )
+        except Exception as e:
+            import traceback
+
+            return jsonify(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+            ), 500
+
+
+#########################
+### HELPER FUNCTIONS ###
+#########################
+
+
 def format_readable_eq(eq):
-    time.sleep(0.1)
+    """Convert gplearn equation format to readable infix notation."""
     eq = str(eq)
     operation = ""
+
     for idx, char in enumerate(eq):
         operation += char
 
-        if char == '(':
+        if char == "(":
             valid_op = False
-            operator = ""
+            op = ""
             match operation[:-1]:
                 case "add":
-                    operator = " + " 
+                    op = " + "
                     valid_op = True
                 case "mul":
-                    operator = " * " 
+                    op = " * "
                     valid_op = True
                 case "sub":
-                    operator = " - " 
+                    op = " - "
                     valid_op = True
                 case "div":
-                    operator = " / " 
+                    op = " / "
                     valid_op = True
+                case "pow":
+                    op = " ** "
+                    valid_op = True
+
             if not valid_op:
-                #print("NON-Valid OP:: " + operation)
-                return operation + format_readable_eq(eq[idx+1:-1]) + ")"
+                return operation + format_readable_eq(eq[idx + 1 : -1]) + ")"
 
             parenthesis = 0
             first_exp = ""
             second_exp = ""
             assign_to_first = True
-            for idx_inner, char_inner in enumerate(eq[idx+1:]):
+
+            for char_inner in eq[idx + 1 :]:
                 if char_inner == " ":
                     continue
                 elif char_inner == "(":
@@ -290,226 +700,6 @@ def format_readable_eq(eq):
                 else:
                     second_exp += char_inner
 
-            #print("Valid OP("+operator+"):: " + operation)
-            return format_readable_eq(first_exp) + operator + format_readable_eq(second_exp)
+            return format_readable_eq(first_exp) + op + format_readable_eq(second_exp)
 
-    #print("EOL:: " + operation)
     return operation
-
-def eq(x):
-    #if c1==0 or c2==0 or c3==0:
-    #    return 0
-    #return math.cos(c1*x) + math.sin(c2*x)
-    return math.cos(c1*x)*e1 + math.sin(c2*x)*e2 * math.atan(c3*x)*e3
-    #return math.cos(1/c1*x**e1) + math.sin(1/c2*x**e2) * math.tan(1/c3*x**e3)
-
-
-def animate_blank(i):
-    line.set_data([], [])
-    return (line,)
-
-def animate_actual(i):
-    global line
-    line.set_color(acutal_color)
-    
-    xs = np.arange(0, domain*i/100, global_step)
-    xs -= domain/2
-    ys = [eq(x) for x in xs]
-
-    line.set_data(xs, ys)
-    return (line,)
-
-
-def animate_low_mem(i):
-    global line
-    line.set_color(predicted_color)
-
-    if line_ready(i):
-        xs = np.arange(0, domain*i/100, global_step)
-        xs -= domain/2
-        ys = sr._program.execute(xs.reshape(-1,1))
-
-        line.set_data(xs, ys)
-    return (line,)
-
-def animate_predicted(i):
-    global line
-    line.set_color(predicted_color)
-    #line.set_color((1-(i/100), i/100, i/100))
-
-    if line_ready(i):
-        xs = np.arange(0, domain, global_step)
-        xs -= domain/2
-        idx = prog_idx(i)
-
-        ys = get_ng_best(idx, xs)
-
-        line.set_data(xs, ys)
-    return (line,)
-
-def animate_live_learning(i):
-    global live_xs, live_ys, score_ys, line, line2
-    line.set_color(live_color)
-    line2.set_color("red")
-
-    if line_ready(i):
-        xs = np.arange(domain*(i-1)/100, domain*i/100, global_step)
-        xs -= domain/2
-        live_xs.extend(xs)
-        idx = prog_idx(i)
-
-        live_ys.extend( get_ng_best(idx, xs) )
-        score_ys.extend( np.full(len(xs), get_capped_score(idx)) )
-
-        line.set_data(live_xs, live_ys)
-        line2.set_data(live_xs, score_ys)
-    return (line,)
-
-
-def line_ready(i):
-    global line
-    if (i==0):
-        line.set_data([], [])
-        return False
-    else:
-        return True
-
-def prog_idx(frame):
-    return round((frame * (len(sr._programs)-1)) / 100)
-
-def get_ng_best(idx, exec_on):
-    if idx == len(sr._programs):
-        best_fit = predict_final
-        length_of = len(best_fit) - len(exec_on)
-        best_fit = best_fit[length_of:]
-    else:
-        fitness_set = [((prg and abs(prg.raw_fitness_)) or 100) for prg in sr._programs[idx]]
-        best_fit_idx = fitness_set.index(min(fitness_set))
-        best_fit = sr._programs[idx][best_fit_idx]
-        best_fit = best_fit.execute(exec_on.reshape(-1,1))
-    return best_fit
-
-def get_capped_score(idx):
-    fitness_set = np.array([((prg and abs(prg.fitness_)<9.5 and abs(prg.fitness_)) or 9.5) for prg in sr._programs[idx]])
-    best_fit = np.min(fitness_set)
-    print(fitness_set);
-    return best_fit
-
-
-
-#############################
-#
-# DEPRACTED
-#
-#############################
-
-def animate_live(i):
-    #line.set_color((.1,(i+1)/100,.1))
-    line.set_color("green")
-
-    if (i==0):
-        live_xs = []
-        live_ys = []
-        line.set_data([], [])
-        return (line,)
-    elif (i==99):
-        xs = np.arange(0, domain, global_step)
-        xs -= domain/2
-        ys = predict_final
-        #line.set_color("purple")
-    else:
-        xs = np.arange(0, domain*i/100, global_step)
-        xs -= domain/2
-        ys = sr.predict(xs.reshape(-1,1))
-
-    line.set_data(xs, ys)
-    return (line,)
-
-def animate_live_low_mem(i):
-    line.set_color("green")
-
-    if (i==0):
-        line.set_data([], [])
-        return (line,)
-    else:
-        xs = np.arange(0, domain*i/100, global_step)
-        xs -= domain/2
-        ys = sr.predict(xs.reshape(-1,1))
-        live_ys.append(ys[-3:])
-    print("LIVE::")
-    print(live_ys)
-    #time.sleep(0.5)
-
-    line.set_data(xs, live_ys)
-    return (line,)
-
-def old_format_readable_eq(eq):
-    print("RECUR CALL::")
-    #time.sleep(1)
-    operation = ""
-    for idx, char in enumerate(str(eq)):
-        if char == '(':
-            valid_op = False
-            match operation:
-                case "add":
-                    valid_op = True
-                case "mul":
-                    valid_op = True
-                case "sub":
-                    valid_op = True
-                case "div":
-                    valid_op = True
-
-            if valid_op:
-                first_exp = ""
-                second_exp = ""
-                final_exp = ""
-                assign_to_first = True
-                in_parenthesis = False
-                for idx_inner, char_inner in enumerate(str(eq)[idx+1:]):
-                    if char_inner == ' ':
-                        continue
-
-                    if assign_to_first:
-                        if char_inner == ',':
-                            assign_to_first = False
-                        else:
-                            first_exp += char_inner
-                    else:
-                        second_exp += char_inner
-
-                    if char_inner == '(':
-                        in_parenthesis = True
-                    if char_inner == ')':
-                        if not in_parenthesis:
-                            final_exp = str(eq)[idx_inner+1:]
-                            break
-                        in_parenthesis = False
-
-                operator = ""
-                match operation:
-                    case "add":
-                        operator = " + " 
-                    case "mul":
-                        operator = " * " 
-                    case "sub":
-                        operator = " - " 
-                    case "div":
-                        operator = " / " 
-
-                out = format_readable_eq(first_exp) + operator + format_readable_eq(second_exp) + format_readable_eq(final_exp)
-                print(out)
-                return out
-            else:
-                out = operation + "(" + format_readable_eq(str(eq)[idx+1:-1]) + ")"
-                print(out)
-                return out
-
-        else:
-            operation += char
-    out = operation + "(" + format_readable_eq(str(eq)[idx+1:-1]) + ")"
-    print(operation)
-    return operation
-
-
-#end
