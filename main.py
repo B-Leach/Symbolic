@@ -10,7 +10,7 @@ import time
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from flask import Flask, Response, render_template
+from flask import Flask, Response, jsonify, render_template, request
 
 # Lock to prevent concurrent requests from corrupting shared state
 _request_lock = threading.Lock()
@@ -276,6 +276,66 @@ def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
             full_plot=full_plot,
             samples=max_samples * 100,
         )
+
+
+@app.route("/train", methods=["POST"])
+def train():
+    global \
+        c1, \
+        e1, \
+        c2, \
+        e2, \
+        c3, \
+        e3, \
+        low_memory, \
+        predict_final, \
+        live_xs, \
+        live_ys, \
+        score_ys, \
+        lines, \
+        y_actual
+    with _request_lock:
+        try:
+            data = request.get_json()
+            c1 = float(data.get("c1", 0))
+            e1 = float(data.get("e1", 0))
+            c2 = float(data.get("c2", 0))
+            e2 = float(data.get("e2", 0))
+            c3 = float(data.get("c3", 0))
+            e3 = float(data.get("e3", 0))
+            low_memory = bool(int(data.get("low_memory", 0)))
+
+            predict_final = []
+            live_xs = []
+            live_ys = []
+            score_ys = []
+
+            for line in lines:
+                line.set_data([], [])
+
+            y_actual = [eq(x) for x in x_train]
+            sr.fit(x_train.reshape(-1, 1), y_actual)
+
+            predict_final = sr.predict(x_train.reshape(-1, 1))
+            predicted_equation = format_readable_eq(sr._program)
+
+            anim = animation.FuncAnimation(
+                fig_one, animate_all, frames=100, interval=40, blit=True, repeat=False
+            )
+            full_plot = anim.to_html5_video().replace("\n", " ").replace("\r", "")
+
+            pct_score = str(round(100 - (_sigmoid(y_actual, predict_final) * 100), 3))
+
+            return jsonify(
+                {
+                    "success": True,
+                    "video_html": full_plot,
+                    "pct_score": pct_score,
+                    "pr_eq_formatted": predicted_equation,
+                }
+            )
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
 
 
 ##########################
