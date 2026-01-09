@@ -207,13 +207,34 @@
 
       setLoading(true);
 
-      fetch('/train', {
+      // First validate the equation
+      fetch('/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params)
       })
       .then(response => response.json())
+      .then(validationData => {
+        if (!validationData.valid) {
+          setLoading(false);
+          alert('Invalid equation: ' + (validationData.error || 'Unknown error'));
+          return;
+        }
+
+        // If valid, proceed with training
+        return fetch('/train', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params)
+        });
+      })
+      .then(response => {
+        if (!response) return; // Validation failed
+        return response.json();
+      })
       .then(data => {
+        if (!data) return; // Validation failed
+
         setLoading(false);
 
         if (data.success) {

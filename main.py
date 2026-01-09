@@ -186,9 +186,21 @@ def detect_functions_in_equation(equation_str):
         if func_name + "(" in equation_lower:
             used_functions.add(gplearn_name)
 
-    # Check for power operator
-    if "**" in equation_str or "^" in equation_str:
-        used_functions.add("pow")
+    # Check for power operator - parse AST to detect Pow nodes
+    try:
+        # Replace ^ with ** for parsing
+        eq_normalized = equation_str.replace("^", "**")
+        tree = ast.parse(eq_normalized, mode="eval")
+
+        # Walk the AST to find Pow operations
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                used_functions.add("pow")
+                break
+    except:
+        # Fallback to simple string check
+        if "**" in equation_str or "^" in equation_str:
+            used_functions.add("pow")
 
     return used_functions
 
@@ -213,21 +225,24 @@ mpl.use("Agg")
 
 def create_figure():
     """Create a fresh figure for each animation to avoid state issues."""
-    fig, axs = plt.subplots(4, sharex=True, figsize=(10, 8))
+    fig, axs = plt.subplots(4, sharex=True, figsize=(12, 14))  # Increased size
     fig.suptitle(
-        "Symbolic Regression Learning Progress", fontsize=14, fontweight="bold"
+        "Symbolic Regression Learning Progress",
+        fontsize=16,
+        fontweight="bold",
+        color="#ffffff",
     )
-    fig.set_facecolor("#f5f5f7")
+    fig.set_facecolor("#0f0f0f")  # Match website dark background
 
-    axs[0].set_title("Target Function", fontsize=10)
-    axs[1].set_title("Best Predicted Function", fontsize=10)
-    axs[2].set_title("Live Prediction", fontsize=10)
-    axs[3].set_title("R² Score (0 = poor, 1 = perfect)", fontsize=10)
+    axs[0].set_title("Target Function", fontsize=11, color="#a0a0a0")
+    axs[1].set_title("Best Predicted Function", fontsize=11, color="#a0a0a0")
+    axs[2].set_title("Live Prediction", fontsize=11, color="#a0a0a0")
+    axs[3].set_title("R² Score (0 = poor, 1 = perfect)", fontsize=11, color="#a0a0a0")
 
-    (line_act,) = axs[0].plot([], [], lw=2, color=actual_color)
-    (line_pred,) = axs[1].plot([], [], lw=2, color=predicted_color)
-    (line_live,) = axs[2].plot([], [], lw=2, color=live_color)
-    (line_score,) = axs[3].plot([], [], lw=2, color=score_color)
+    (line_act,) = axs[0].plot([], [], lw=2.5, color=actual_color)
+    (line_pred,) = axs[1].plot([], [], lw=2.5, color=predicted_color)
+    (line_live,) = axs[2].plot([], [], lw=2.5, color=live_color)
+    (line_score,) = axs[3].plot([], [], lw=2.5, color=score_color)
 
     lines = [line_act, line_pred, line_live, line_score]
 
@@ -237,8 +252,15 @@ def create_figure():
             ax.set_ylim(-0.1, 1.1)
         else:
             ax.set_ylim(-10, 10)
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor("#ffffff")
+        ax.grid(True, alpha=0.2, color="#333333", linestyle="-", linewidth=0.5)
+        ax.set_facecolor("#1a1a1a")  # Dark background for plots
+        # Style the axes
+        ax.spines["bottom"].set_color("#333333")
+        ax.spines["top"].set_color("#333333")
+        ax.spines["left"].set_color("#333333")
+        ax.spines["right"].set_color("#333333")
+        ax.tick_params(axis="x", colors="#666666")
+        ax.tick_params(axis="y", colors="#666666")
 
     plt.tight_layout()
     return fig, axs, lines
@@ -401,6 +423,38 @@ def index_blank():
             full_plot=full_plot,
             samples=max_samples * 100,
         )
+
+
+@app.route("/validate", methods=["POST"])
+def validate():
+    """Validate an equation without training."""
+    try:
+        data = request.get_json()
+        equation_str = data.get("equation", "").strip()
+
+        if not equation_str:
+            return jsonify({"valid": False, "error": "Please enter an equation"}), 400
+
+        # Try to parse the equation
+        try:
+            y_test = parse_equation(
+                equation_str, x_train[:10]
+            )  # Test with small subset
+        except ValueError as e:
+            return jsonify({"valid": False, "error": str(e)}), 400
+
+        # Check for NaN or Inf values
+        if np.any(np.isnan(y_test)) or np.any(np.isinf(y_test)):
+            return jsonify(
+                {
+                    "valid": False,
+                    "error": "Equation produces invalid values (NaN or Infinity)",
+                }
+            ), 400
+
+        return jsonify({"valid": True, "message": "Equation is valid"})
+    except Exception as e:
+        return jsonify({"valid": False, "error": str(e)}), 400
 
 
 @app.route("/train", methods=["POST"])
