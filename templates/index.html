@@ -33,32 +33,25 @@
           <h2 class="card-title">Equation to Learn</h2>
 
           <div class="equation-builder">
-            <div class="equation-display">
-              <span class="symbol">y =</span>
-              <input type="number" name="e1" id="e1" value="{{e1}}" step="0.1">
-              <span class="func">cos(</span>
-              <input type="number" name="c1" id="c1" value="{{c1}}" step="0.1">
-              <span class="symbol">x )</span>
-              <span class="symbol">+</span>
-              <input type="number" name="e2" id="e2" value="{{e2}}" step="0.1">
-              <span class="func">sin(</span>
-              <input type="number" name="c2" id="c2" value="{{c2}}" step="0.1">
-              <span class="symbol">x )</span>
-              <span class="symbol">·</span>
-              <input type="number" name="e3" id="e3" value="{{e3}}" step="0.1">
-              <span class="func">arctan(</span>
-              <input type="number" name="c3" id="c3" value="{{c3}}" step="0.1">
-              <span class="symbol">x )</span>
+            <div class="equation-input-wrapper">
+              <label for="equation" class="equation-label">
+                <span class="symbol">y =</span>
+              </label>
+              <input type="text" name="equation" id="equation" value="{{equation}}"
+                     placeholder="e.g., 2*sin(x) + cos(2*x)"
+                     class="equation-input">
             </div>
 
-            <div class="checkbox-wrapper" onclick="document.getElementById('low_memory').click()">
-              <input type="checkbox" id="low_memory">
-              <label for="low_memory">Low Memory Mode (faster, less detail)</label>
+            <div class="help-text">
+              <strong>Supported functions:</strong> sin, cos, tan, arctan/atan, sqrt, log/ln, exp, abs<br>
+              <strong>Operators:</strong> +, -, *, /, ** (or ^)<br>
+              <strong>Constants:</strong> pi, e<br>
+              <strong>Variable:</strong> x
             </div>
 
             <div class="btn-group">
               <button class="btn btn-secondary" onclick="randomize()" id="btn-random">
-                Randomize
+                Random Example
               </button>
               <button class="btn btn-primary" onclick="startTraining()" id="btn-learn">
                 Learn
@@ -142,8 +135,6 @@
         document.getElementById('full_plot').innerHTML = plotHtml;
         setupVideo();
       }
-
-      document.getElementById('low_memory').checked = "{{low_mem}}" === "True";
     });
 
     function setupVideo() {
@@ -166,17 +157,22 @@
     }
 
     function randomize() {
-      const inputs = ['c1', 'e1', 'c2', 'e2', 'c3', 'e3'];
-      inputs.forEach(id => {
-        let val = 0;
-        while (val === 0) {
-          const r = Math.random();
-          if (r < 0.5) val = Math.round(Math.random() * 2 * 10) / 10;
-          else if (r < 0.8) val = Math.round(Math.random() * 5 * 10) / 10;
-          else val = Math.round(Math.random() * 10 * 10) / 10;
-        }
-        document.getElementById(id).value = val;
-      });
+      const examples = [
+        '2*sin(x) + cos(2*x)',
+        'sin(x) * cos(x)',
+        'x**2 + 3*x - 5',
+        'exp(-x**2/10)',
+        'sqrt(abs(x)) * sin(x)',
+        'log(abs(x) + 1) * cos(x)',
+        'arctan(x) + sin(2*x)',
+        '3*sin(x) - 2*cos(3*x)',
+        'x * exp(-x**2/20)',
+        'sin(x) / (x + 0.1)',
+        'cos(x) + sin(x**2/5)',
+        'tan(x/3) + cos(x)'
+      ];
+      const randomExample = examples[Math.floor(Math.random() * examples.length)];
+      document.getElementById('equation').value = randomExample;
     }
 
     function setLoading(isLoading) {
@@ -198,14 +194,15 @@
     }
 
     function startTraining() {
+      const equation = document.getElementById('equation').value.trim();
+
+      if (!equation) {
+        alert('Please enter an equation');
+        return;
+      }
+
       const params = {
-        c1: document.getElementById('c1').value,
-        e1: document.getElementById('e1').value,
-        c2: document.getElementById('c2').value,
-        e2: document.getElementById('e2').value,
-        c3: document.getElementById('c3').value,
-        e3: document.getElementById('e3').value,
-        low_memory: document.getElementById('low_memory').checked ? 1 : 0
+        equation: equation
       };
 
       setLoading(true);
@@ -227,7 +224,9 @@
           setupVideo();
         } else {
           alert('Training failed: ' + (data.error || 'Unknown error'));
-          console.error(data.traceback);
+          if (data.traceback) {
+            console.error(data.traceback);
+          }
         }
       })
       .catch(error => {
