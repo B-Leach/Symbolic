@@ -1,206 +1,241 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
-  <head>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Symbolic Learning - Genetic Programming Demo</title>
+  <link href="{{ url_for('static', filename='/css/styles.css') }}" type="text/css" rel="stylesheet">
+</head>
+<body>
 
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Symbolic Learning</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
-    <link href="{{ url_for('static', filename='/css/styles.css') }}" type="text/css" rel="stylesheet" />
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-  </head>
-  <body>
+  <!-- Loading Overlay -->
+  <div id="hider">
+    <div id="loader"></div>
+    <div id="loader-text">Training model...</div>
+  </div>
 
-    <div class="container">
+  <div class="container">
 
-      <div id="hider">
-        <div id="loader"></div>
-      </div>
-      <div id="cover"></div>
+    <!-- Header -->
+    <header class="header">
+      <h1>Symbolic Learning</h1>
+      <p>Discover mathematical formulas through genetic programming</p>
+    </header>
 
-      <div class="row body">
-        <div class="col-md-6 mt-2">
-          <div class="mt-4 title">
-            <h1>Symbolic Learning</h1>
-          </div>
-          <br>
-          <p><i>Equation to learn:</i><br>
-            <hr width="100%" color="#eaeaea" style="margin:0;"><br>
+    <!-- Main Content Grid -->
+    <div class="main-grid">
 
-            <small>
+      <!-- Left Column: Controls & Results -->
+      <div class="left-column">
 
-              <math>
-                <mrow>
-                  <mi>y</mi>
-                  <mo>=</mo>
-                  <mn><input type="number" name="e1" value="{{e1}}" /></mn>
-                  <mi>cos</mi>
-                  <mo>(</mo>
-                  <mn><input type="number" name="c1" value="{{c1}}" /></mn>
-                  <mi>X</mi>
-                  <mo>)</mo>
-                  <mo>+</mo>
-                  <mn><input type="number" name="e2" value="{{e2}}" /></mn>
-                  <mi>sin</mi>
-                  <mo>(</mo>
-                  <mn><input type="number" name="c2" value="{{c2}}" /></mn>
-                  <mi>X</mi>
-                  <mo>)</mo>
-                  <mn><input type="number" name="e3" value="{{e3}}" /></mn>
-                  <mi>arctan</mi>
-                  <mo>(</mo>
-                  <mn><input type="number" name="c3" value="{{c3}}" /></mn>
-                  <mi>X</mi>
-                  <mo>)</mo>
+        <!-- Equation Builder Card -->
+        <div class="card">
+          <h2 class="card-title">Equation to Learn</h2>
 
-                </mrow>
-              </math>
-
-            </small>
-            <br><br><hr width="100%" color="#eaeaea" style="margin:0;">
-
-
-            <div class="form-check ms-3 mt-3">
-              <small>
-                <input class="form-check-input mt-2" type="checkbox" id="low_memory">
-                <label class="form-check-label mt-1" for="low_memory">Enable Low Memory Mode</label>
-              </small>
+          <div class="equation-builder">
+            <div class="equation-display">
+              <span class="symbol">y =</span>
+              <input type="number" name="e1" id="e1" value="{{e1}}" step="0.1">
+              <span class="func">cos(</span>
+              <input type="number" name="c1" id="c1" value="{{c1}}" step="0.1">
+              <span class="symbol">x )</span>
+              <span class="symbol">+</span>
+              <input type="number" name="e2" id="e2" value="{{e2}}" step="0.1">
+              <span class="func">sin(</span>
+              <input type="number" name="c2" id="c2" value="{{c2}}" step="0.1">
+              <span class="symbol">x )</span>
+              <span class="symbol">·</span>
+              <input type="number" name="e3" id="e3" value="{{e3}}" step="0.1">
+              <span class="func">arctan(</span>
+              <input type="number" name="c3" id="c3" value="{{c3}}" step="0.1">
+              <span class="symbol">x )</span>
             </div>
-            <small><input type="button" class="btn btn-outline-secondary m-2" value="Randomize" onclick="random_learn()" /></small>
-            <small><input type="button" class="btn btn-outline-secondary m-2" value="Learn" onclick="reload_learn()" /></small>
-            <small><input type="button" class="btn btn-outline-secondary m-2" value="Replay Anims" onclick="replay_anims()" /></small>
-          </p>
-          <br>
-          <p><strong>Formatted Equation: </strong><span id="formatted_eq">{{pr_eq_formatted}}</span></p>
-          <p><strong>R² Score: </strong><span id="r2_score">{{r2_score}}</span></p>
-          <p><strong>Mean Absolute Error: </strong><span id="mae_score">{{mae_score}}</span></p>
 
-          <div class="about p-2 mt-4">
-            <h4>About Symbolic Learning</h4>
-            <p>This page utilizes a form of symbolic regression to perform genetic programming.
-            The goal is to find a mathematic formula that can best represent the input data.
-            In this case, the input data comes from the equation where the user is allowed to alter the coefficients of the expression.
-            The symbolic regressor is trained using {{samples}}% of the data points, calculated from the input expression.
-            The regressor attempts to find the best mathematical fit by applying genetic programming.
-            This generates a "population size" of equations that attempt to fit the input data.
-            The best of these equations continue onto the next "generation" of equations.
-            In this case, a population size of {{ps}} is being used across {{ga}} generations. </p>
+            <div class="checkbox-wrapper" onclick="document.getElementById('low_memory').click()">
+              <input type="checkbox" id="low_memory">
+              <label for="low_memory">Low Memory Mode (faster, less detail)</label>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-secondary" onclick="randomize()" id="btn-random">
+                Randomize
+              </button>
+              <button class="btn btn-primary" onclick="startTraining()" id="btn-learn">
+                Learn
+              </button>
+              <button class="btn btn-secondary" onclick="replayAnimation()" id="btn-replay">
+                Replay
+              </button>
+            </div>
           </div>
         </div>
 
-        <div class="col-md-6 plots">
-          <div id="full_plot" class=""></div>
+        <!-- Results Card -->
+        <div class="card">
+          <h2 class="card-title">Results</h2>
+
+          <div class="results-grid">
+            <div class="result-item success">
+              <div class="result-label">R² Score</div>
+              <div class="result-value" id="r2_score">{{r2_score}}</div>
+            </div>
+            <div class="result-item warning">
+              <div class="result-label">Mean Absolute Error</div>
+              <div class="result-value" id="mae_score">{{mae_score}}</div>
+            </div>
+          </div>
+
+          <div class="result-item" style="margin-top: 15px;">
+            <div class="result-label">Discovered Equation</div>
+            <div class="result-value" id="formatted_eq" style="font-size: 1rem;">{{pr_eq_formatted}}</div>
+          </div>
+
+          <div class="stats-row">
+            <span class="stat-badge">Population: <strong>{{ps}}</strong></span>
+            <span class="stat-badge">Generations: <strong>{{ga}}</strong></span>
+            <span class="stat-badge">Training: <strong>{{samples}}%</strong></span>
+          </div>
         </div>
+
+        <!-- About Section -->
+        <details class="about-section">
+          <summary>About Symbolic Learning</summary>
+          <div class="content">
+            <p>
+              This demo uses <strong>symbolic regression</strong> via genetic programming to discover
+              mathematical formulas that fit the target equation you define.
+            </p>
+            <p>
+              The algorithm evolves a population of candidate equations over multiple generations.
+              Each generation, the best-performing equations are selected and combined to create
+              new candidates. Over time, the population converges toward formulas that accurately
+              represent the target function.
+            </p>
+            <p>
+              <strong>R² Score</strong> measures how well the prediction explains the variance in
+              the data (1.0 = perfect fit). <strong>MAE</strong> shows the average absolute error
+              between predicted and actual values.
+            </p>
+          </div>
+        </details>
 
       </div>
 
-
-      <!--<div class="row mt-4">
-        <small><small class="lh-1">
-          You may experience long loading times due to the rigorous nature of the genetic programming.
-        </small></small>
-      </div>-->
+      <!-- Right Column: Visualization -->
+      <div class="right-column">
+        <div class="card">
+          <h2 class="card-title">Visualization</h2>
+          <div class="video-container">
+            <div id="full_plot"></div>
+          </div>
+        </div>
+      </div>
 
     </div>
+  </div>
 
-    <script>
-      document.getElementById("full_plot").innerHTML += htmlDecode("{{full_plot}}");
-
-      document.getElementById("low_memory").checked = "{{low_mem}}" == "True";
-
-      $(function(){
-        $(':input[type="number"]').change(function () {
-          size = $(this).val().length * 10;
-          $(this).css("min-width", size + "px");
-        });
-        $(':input[type="number"]').trigger("change");
-      });
-
-      let vids = document.getElementsByTagName("video");
-      for (var i = 0; i < vids.length; i++){
-        vids[i].controls=false;
-        vids[i].setAttribute("playsinline", "playsinline");
+  <script>
+    // Initialize video on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      const plotHtml = `{{full_plot|safe}}`;
+      if (plotHtml && plotHtml.trim()) {
+        document.getElementById('full_plot').innerHTML = plotHtml;
+        setupVideo();
       }
 
+      document.getElementById('low_memory').checked = "{{low_mem}}" === "True";
+    });
 
-      function htmlDecode(input) {
-        var doc = new DOMParser().parseFromString(input, "text/html");
-        return doc.documentElement.textContent;
+    function setupVideo() {
+      const videos = document.getElementsByTagName('video');
+      for (let vid of videos) {
+        vid.controls = false;
+        vid.setAttribute('playsinline', 'playsinline');
+        vid.muted = true;
+        vid.play().catch(() => {});
       }
+    }
 
+    function replayAnimation() {
+      const videos = document.getElementsByTagName('video');
+      for (let vid of videos) {
+        vid.pause();
+        vid.currentTime = 0;
+        vid.play().catch(() => {});
+      }
+    }
 
-      function replay_anims(){
-        let vids = document.getElementsByTagName("video");
-        for (var i = 0; i < vids.length; i++){
-          vids[i].pause();
-          vids[i].currentTime = '0';
-          vids[i].play();
+    function randomize() {
+      const inputs = ['c1', 'e1', 'c2', 'e2', 'c3', 'e3'];
+      inputs.forEach(id => {
+        let val = 0;
+        while (val === 0) {
+          const r = Math.random();
+          if (r < 0.5) val = Math.round(Math.random() * 2 * 10) / 10;
+          else if (r < 0.8) val = Math.round(Math.random() * 5 * 10) / 10;
+          else val = Math.round(Math.random() * 10 * 10) / 10;
         }
+        document.getElementById(id).value = val;
+      });
+    }
+
+    function setLoading(isLoading) {
+      const hider = document.getElementById('hider');
+      const btnLearn = document.getElementById('btn-learn');
+      const btnRandom = document.getElementById('btn-random');
+
+      if (isLoading) {
+        hider.classList.add('active');
+        btnLearn.disabled = true;
+        btnRandom.disabled = true;
+        btnLearn.textContent = 'Training...';
+      } else {
+        hider.classList.remove('active');
+        btnLearn.disabled = false;
+        btnRandom.disabled = false;
+        btnLearn.textContent = 'Learn';
       }
+    }
 
+    function startTraining() {
+      const params = {
+        c1: document.getElementById('c1').value,
+        e1: document.getElementById('e1').value,
+        c2: document.getElementById('c2').value,
+        e2: document.getElementById('e2').value,
+        c3: document.getElementById('c3').value,
+        e3: document.getElementById('e3').value,
+        low_memory: document.getElementById('low_memory').checked ? 1 : 0
+      };
 
-      function random_learn(){
-        var tbs = document.querySelectorAll('input[type=number]');
-        for (var i = 0; i < tbs.length; i++){
-          var val = 0;
-          while (val == 0){
-            if (Math.random() < 0.5)
-              val = Math.round(Math.random()*2*10)/10;
-            else if (Math.random() < 0.8)
-              val = Math.round(Math.random()*5*10)/10;
-            else
-              val = Math.round(Math.random()*10*10)/10;
-          }; tbs[i].value = val; $(tbs[i]).trigger("change");
-        }; //reload_learn();
-      }
+      setLoading(true);
 
+      fetch('/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      })
+      .then(response => response.json())
+      .then(data => {
+        setLoading(false);
 
-      function reload_learn(){
-        var params = {
-          c1: document.getElementsByName("c1")[0].value,
-          e1: document.getElementsByName("e1")[0].value,
-          c2: document.getElementsByName("c2")[0].value,
-          e2: document.getElementsByName("e2")[0].value,
-          c3: document.getElementsByName("c3")[0].value,
-          e3: document.getElementsByName("e3")[0].value,
-          low_memory: document.getElementById("low_memory").checked ? 1 : 0
-        };
+        if (data.success) {
+          document.getElementById('full_plot').innerHTML = data.video_html;
+          document.getElementById('r2_score').textContent = data.r2_score;
+          document.getElementById('mae_score').textContent = data.mae_score;
+          document.getElementById('formatted_eq').textContent = data.pr_eq_formatted;
+          setupVideo();
+        } else {
+          alert('Training failed: ' + (data.error || 'Unknown error'));
+          console.error(data.traceback);
+        }
+      })
+      .catch(error => {
+        setLoading(false);
+        alert('Request failed: ' + error.message);
+      });
+    }
+  </script>
 
-        document.getElementById("hider").style.opacity = 1.0;
-
-        fetch("/train", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(params)
-        })
-        .then(response => response.json())
-        .then(data => {
-          document.getElementById("hider").style.opacity = 0;
-          if (data.success) {
-            document.getElementById("full_plot").innerHTML = htmlDecode(data.video_html);
-            document.getElementById("r2_score").textContent = data.r2_score;
-            document.getElementById("mae_score").textContent = data.mae_score;
-            document.getElementById("formatted_eq").textContent = data.pr_eq_formatted;
-
-            // Set up the new video
-            let vids = document.getElementsByTagName("video");
-            for (var i = 0; i < vids.length; i++){
-              vids[i].controls = false;
-              vids[i].setAttribute("playsinline", "playsinline");
-            }
-          } else {
-            alert("Training failed: " + (data.error || "Unknown error"));
-          }
-        })
-        .catch(error => {
-          document.getElementById("hider").style.opacity = 0;
-          alert("Request failed: " + error.message);
-        });
-      }
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-
-  </body>
+</body>
 </html>

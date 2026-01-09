@@ -1,30 +1,24 @@
-import base64
-import html
-import io
 import math
-import random
-import sys
+import shutil
 import threading
-import time
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from flask import Flask, Response, jsonify, render_template, request
-
-# Lock to prevent concurrent requests from corrupting shared state
-_request_lock = threading.Lock()
+from flask import Flask, jsonify, render_template, request
 from gplearn.fitness import make_fitness
 from gplearn.functions import make_function
 from gplearn.genetic import SymbolicRegressor
 from matplotlib import animation
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from matplotlib.figure import Figure
 
 app = Flask(__name__)
 
+# Lock to prevent concurrent requests from corrupting shared state
+_request_lock = threading.Lock()
+
 
 def eq(x):
+    """Target equation: e1*cos(c1*x) + e2*sin(c2*x)*e3*arctan(c3*x)"""
     return math.cos(c1 * x) * e1 + math.sin(c2 * x) * e2 * math.atan(c3 * x) * e3
 
 
@@ -54,93 +48,77 @@ score_ys = []
 
 
 #############################
-### GRAPH INTITIALIZATION ###
+### GRAPH INITIALIZATION ###
 #############################
 
-acutal_color = "orange"
-predicted_color = "blue"
-live_color = "green"
-score_color = "red"
+actual_color = "#ff9500"  # Orange
+predicted_color = "#007aff"  # Blue
+live_color = "#34c759"  # Green
+score_color = "#ff3b30"  # Red
 
-import shutil
-
+# Configure FFmpeg for h264 encoding (browser compatible)
 _ffmpeg_path = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 mpl.rcParams["animation.ffmpeg_path"] = _ffmpeg_path
-fig_one = Figure()
-fig_one, axs = plt.subplots(4, sharex=True)
-fig_one.suptitle("A tale of regression metrics")
-fig_one.set_facecolor("lightgray")
-fig_one.set_figheight(8)
-axs[0].set_title("Actual")
-axs[1].set_title("Predicted")
-axs[2].set_title("Live")
-axs[3].set_title("R² Score")
-(line_act,) = axs[0].plot([], [], lw=2, color=acutal_color)
-(line_pred,) = axs[1].plot([], [], lw=2, color=predicted_color)
-(line_live,) = axs[2].plot([], [], lw=2, color=live_color)
-(line_score,) = axs[3].plot([], [], lw=2, color=score_color)
-lines = [line_act, line_pred, line_live, line_score]
-for idx, ax in enumerate(axs):
-    ax.set_xlim(-domain / 2, domain / 2)
-    if idx == len(axs) - 1:
-        ax.set_ylim(0, 1)  # R² ranges from 0 to 1
-    else:
-        ax.set_ylim(-10, 10)
-    ax.grid()
+mpl.rcParams["animation.codec"] = "h264"
+
+# Use a non-interactive backend
+mpl.use("Agg")
+
+
+def create_figure():
+    """Create a fresh figure for each animation to avoid state issues."""
+    fig, axs = plt.subplots(4, sharex=True, figsize=(10, 8))
+    fig.suptitle(
+        "Symbolic Regression Learning Progress", fontsize=14, fontweight="bold"
+    )
+    fig.set_facecolor("#f5f5f7")
+
+    axs[0].set_title("Target Function", fontsize=10)
+    axs[1].set_title("Best Predicted Function", fontsize=10)
+    axs[2].set_title("Live Prediction", fontsize=10)
+    axs[3].set_title("R² Score (0 = poor, 1 = perfect)", fontsize=10)
+
+    (line_act,) = axs[0].plot([], [], lw=2, color=actual_color)
+    (line_pred,) = axs[1].plot([], [], lw=2, color=predicted_color)
+    (line_live,) = axs[2].plot([], [], lw=2, color=live_color)
+    (line_score,) = axs[3].plot([], [], lw=2, color=score_color)
+
+    lines = [line_act, line_pred, line_live, line_score]
+
+    for idx, ax in enumerate(axs):
+        ax.set_xlim(-domain / 2, domain / 2)
+        if idx == 3:  # R² score graph
+            ax.set_ylim(-0.1, 1.1)  # R² ranges from 0 to 1 (with small padding)
+        else:
+            ax.set_ylim(-10, 10)
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor("#ffffff")
+
+    plt.tight_layout()
+    return fig, axs, lines
 
 
 ############################
 ### REGRESSOR PARAMETERS ###
 ############################
 
-# def  |  recc  |  old
-p_crossover = 0.8  # 0.9      0.7     0.8
-p_subtree_mutation = 0.03  # 0.01     0.1     0.02
-p_hoist_mutation = 0.03  # 0.01     0.05    0.01
-p_point_mutation = 0.02  # 0.01     0.1     0.12
-
-p_point_replace = 0.05  # 0.05             0.05
-
-parsimony_coefficient = 0.005  #                 0.005
-
-max_samples = 0.6  #                            0.526
-
-## 500 pop & 20 gen - cause timeout
-pop_size = 150  # 1000     5000    800   1000
-gen_amt = 20  # 20       40      20     10
-tournament_size = 10  # 5                20
+p_crossover = 0.8
+p_subtree_mutation = 0.03
+p_hoist_mutation = 0.03
+p_point_mutation = 0.02
+p_point_replace = 0.05
+parsimony_coefficient = 0.005
+max_samples = 0.6
+pop_size = 150
+gen_amt = 20
+tournament_size = 10
 
 
 #######################
 ### SCORING METRICS ###
 #######################
 
-
-def _power(x1, x2):
-    with np.errstate(over="ignore"):
-        return np.where(((x1 < 100) & (x2 < 20)), np.power(x1, x2), 0.0)
-
-
-power = make_function(function=_power, name="pow", arity=2)
 arctan = make_function(function=np.arctan, name="arctan", arity=1)
-
-
-def _mape(y, y_pred, w=None):
-    y_a = np.array(y)
-    y_pred = np.array(y_pred)
-    return np.average(np.abs(y_pred - y_a) / y_a, weights=w) * 100
-
-
-mape = make_fitness(function=_mape, greater_is_better=False, wrap=False)
-
-
-def _sigmoid(y, y_pred, w=None):
-    diff = np.abs(y_pred - y)
-    sig = (2 / (1 + np.power(math.e, -diff))) - 1
-    return np.average(sig, weights=w)
-
-
-sigmoid = make_fitness(function=_sigmoid, greater_is_better=False, wrap=False)
 
 
 def _mae(y, y_pred, w=None):
@@ -156,11 +134,13 @@ def calc_r2(y_actual, y_pred):
     """
     y_actual = np.array(y_actual)
     y_pred = np.array(y_pred)
-    ss_res = np.sum((y_actual - y_pred) ** 2)  # Residual sum of squares
-    ss_tot = np.sum((y_actual - np.mean(y_actual)) ** 2)  # Total sum of squares
+    ss_res = np.sum((y_actual - y_pred) ** 2)
+    ss_tot = np.sum((y_actual - np.mean(y_actual)) ** 2)
     if ss_tot == 0:
         return 1.0 if ss_res == 0 else 0.0
-    return 1 - (ss_res / ss_tot)
+    r2 = 1 - (ss_res / ss_tot)
+    # Clamp to 0-1 range for display (negative R² means worse than baseline)
+    return max(0.0, min(1.0, r2))
 
 
 def calc_mae(y_actual, y_pred):
@@ -168,7 +148,7 @@ def calc_mae(y_actual, y_pred):
     return np.average(np.abs(np.array(y_pred) - np.array(y_actual)))
 
 
-# p_crossover, p_subtree_mutation, p_hoist_mutation and p_point_mutation should total to 1.0 or less
+# Create the symbolic regressor
 sr = SymbolicRegressor(
     population_size=pop_size,
     tournament_size=tournament_size,
@@ -203,10 +183,22 @@ def index_blank():
     with _request_lock:
         predicted_equation = "No prediction made yet..."
 
+        # Create fresh figure
+        fig, axs, lines = create_figure()
+
+        def animate_blank(i):
+            return lines
+
         anim = animation.FuncAnimation(
-            fig_one, animate_blank, frames=1, interval=40, blit=True, repeat=False
+            fig, animate_blank, frames=1, interval=40, blit=True, repeat=False
         )
-        full_plot = anim.to_html5_video().replace("\n", " ").replace("\r", "")
+
+        # Use FFMpegWriter with h264 codec for browser compatibility
+        writer = animation.FFMpegWriter(
+            fps=25, codec="h264", extra_args=["-pix_fmt", "yuv420p"]
+        )
+        full_plot = anim.to_html5_video()
+        plt.close(fig)
 
         return render_template(
             "./index.html",
@@ -227,89 +219,10 @@ def index_blank():
         )
 
 
-@app.route("/<values>")
-def index(values="2.0:2.0:0.5:2.0:6.0:2.0:0"):
-    global \
-        c1, \
-        e1, \
-        c2, \
-        e2, \
-        c3, \
-        e3, \
-        low_memory, \
-        predict_final, \
-        live_xs, \
-        live_ys, \
-        score_ys, \
-        lines, \
-        y_actual
-    with _request_lock:
-        v = values.split(":")
-        c1 = float(v[0])
-        e1 = float(v[1])
-        c2 = float(v[2])
-        e2 = float(v[3])
-        c3 = float(v[4])
-        e3 = float(v[5])
-        low_memory = bool(int(v[6]))
-
-        predict_final = []
-        live_xs = []
-        live_ys = []
-        score_ys = []
-
-        for line in lines:
-            line.set_data([], [])
-
-        y_actual = [eq(x) for x in x_train]
-        sr.fit(x_train.reshape(-1, 1), y_actual)
-
-        predict_final = sr.predict(x_train.reshape(-1, 1))
-        predicted_equation = format_readable_eq(sr._program)
-
-        anim = animation.FuncAnimation(
-            fig_one, animate_all, frames=100, interval=40, blit=True, repeat=False
-        )
-        full_plot = anim.to_html5_video().replace("\n", " ").replace("\r", "")
-
-        r2_score = round(calc_r2(y_actual, predict_final), 4)
-        mae_score = round(calc_mae(y_actual, predict_final), 4)
-
-        return render_template(
-            "./index.html",
-            c1=c1,
-            e1=e1,
-            c2=c2,
-            e2=e2,
-            c3=c3,
-            e3=e3,
-            low_mem=low_memory,
-            ps=pop_size,
-            ga=gen_amt,
-            r2_score=r2_score,
-            mae_score=mae_score,
-            pr_eq_formatted=predicted_equation,
-            full_plot=full_plot,
-            samples=max_samples * 100,
-        )
-
-
 @app.route("/train", methods=["POST"])
 def train():
-    global \
-        c1, \
-        e1, \
-        c2, \
-        e2, \
-        c3, \
-        e3, \
-        low_memory, \
-        predict_final, \
-        live_xs, \
-        live_ys, \
-        score_ys, \
-        lines, \
-        y_actual
+    global c1, e1, c2, e2, c3, e3, low_memory, predict_final, y_actual
+
     with _request_lock:
         try:
             data = request.get_json()
@@ -321,24 +234,88 @@ def train():
             e3 = float(data.get("e3", 0))
             low_memory = bool(int(data.get("low_memory", 0)))
 
-            predict_final = []
-            live_xs = []
-            live_ys = []
-            score_ys = []
-
-            for line in lines:
-                line.set_data([], [])
-
+            # Generate target data
             y_actual = [eq(x) for x in x_train]
-            sr.fit(x_train.reshape(-1, 1), y_actual)
 
+            # Train the model
+            sr.fit(x_train.reshape(-1, 1), y_actual)
             predict_final = sr.predict(x_train.reshape(-1, 1))
             predicted_equation = format_readable_eq(sr._program)
 
+            # Create fresh figure for animation
+            fig, axs, lines = create_figure()
+
+            # Animation state
+            live_xs_local = []
+            live_ys_local = []
+            score_ys_local = []
+
+            num_frames = 50  # Reduced for faster loading
+
+            def animate_all(i):
+                if i == 0:
+                    return lines
+
+                train_index = round(i / num_frames * len(x_train))
+                train_index_begin = round((i - 1) / num_frames * len(x_train))
+
+                xs = x_train[:train_index]
+
+                # ACTUAL
+                lines[0].set_data(xs, y_actual[: len(xs)])
+
+                if low_memory or len(sr._programs) == 0:
+                    # Low memory mode - just show final result
+                    ys = sr._program.execute(xs.reshape(-1, 1))
+                    lines[1].set_data(xs, ys)
+                else:
+                    # Map frame to generation
+                    idx = round((i * (len(sr._programs) - 1)) / num_frames)
+                    idx = min(idx, len(sr._programs) - 1)
+
+                    # PREDICTED - show best at this generation
+                    if idx >= len(sr._programs) - 1:
+                        ys = predict_final
+                    else:
+                        fitness_set = [
+                            ((prg and abs(prg.fitness_)) or 100)
+                            for prg in sr._programs[idx]
+                        ]
+                        best_prog_idx = fitness_set.index(min(fitness_set))
+                        prog = sr._programs[idx][best_prog_idx]
+                        ys = prog.execute(x_train.reshape(-1, 1))
+                    lines[1].set_data(x_train, ys)
+
+                    # LIVE - progressive
+                    xs_slice = x_train[train_index_begin:train_index]
+                    if len(xs_slice) > 0:
+                        if idx >= len(sr._programs) - 1:
+                            ys_slice = predict_final[train_index_begin:train_index]
+                        else:
+                            ys_slice = ys[train_index_begin:train_index]
+                        live_xs_local.extend(xs_slice)
+                        live_ys_local.extend(ys_slice)
+                    lines[2].set_data(live_xs_local, live_ys_local)
+
+                    # SCORE - R² over time
+                    r2 = calc_r2(y_actual, ys)
+                    score_ys_local.extend(np.full(max(1, len(xs_slice)), r2))
+                    if len(live_xs_local) == len(score_ys_local):
+                        lines[3].set_data(live_xs_local, score_ys_local)
+
+                return lines
+
             anim = animation.FuncAnimation(
-                fig_one, animate_all, frames=100, interval=40, blit=True, repeat=False
+                fig,
+                animate_all,
+                frames=num_frames,
+                interval=40,
+                blit=True,
+                repeat=False,
             )
-            full_plot = anim.to_html5_video().replace("\n", " ").replace("\r", "")
+
+            full_plot = anim.to_html5_video()
+            plt.close(fig)
 
             r2_score = round(calc_r2(y_actual, predict_final), 4)
             mae_score = round(calc_mae(y_actual, predict_final), 4)
@@ -353,55 +330,11 @@ def train():
                 }
             )
         except Exception as e:
-            return jsonify({"success": False, "error": str(e)}), 500
+            import traceback
 
-
-##########################
-### ANIMATOR FUNCTIONS ###
-##########################
-
-
-def animate_blank(i):
-    global lines
-    return lines
-
-
-def animate_all(i):
-    global lines, live_xs, live_ys, score_ys, low_memory
-    if i == 0:
-        return lines
-
-    train_index = round(i / 100 * len(x_train))
-    train_index_begin = round((i - 1) / 100 * len(x_train))
-
-    xs = x_train[:train_index]
-
-    ### ACTUAL ###
-    lines[0].set_data(xs, y_actual[: len(xs)])
-
-    if low_memory:
-        ### PREDICTED LOW MEM ###
-        ys = sr._program.execute(xs.reshape(-1, 1))
-        lines[1].set_data(xs, ys)
-    else:
-        idx = prog_idx(i)
-
-        ### PREDICTED ###
-        xs = x_train
-        ys = get_ng_best(idx, xs)
-        lines[1].set_data(xs, ys)
-
-        ### LIVE ###
-        xs = x_train[train_index_begin:train_index]
-        live_xs.extend(xs)
-        live_ys.extend(get_ng_best(idx, xs))
-        lines[2].set_data(live_xs, live_ys)
-
-        ### SCORE ###
-        score_ys.extend(np.full(len(xs), get_r2_score(idx)))
-        lines[3].set_data(live_xs, score_ys)
-
-    return lines
+            return jsonify(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+            ), 500
 
 
 #########################
@@ -409,54 +342,11 @@ def animate_all(i):
 #########################
 
 
-def prog_idx(frame):
-    return round((frame * (len(sr._programs) - 1)) / 100)
-
-
-def get_ng_best(idx, exec_on):
-    if idx >= len(sr._programs) - 1:
-        best_fit = predict_final
-        length_of = len(best_fit) - len(exec_on)
-        best_fit = best_fit[length_of:]
-    else:
-        fitness_set = [
-            ((prg and abs(prg.fitness_)) or 100) for prg in sr._programs[idx]
-        ]
-        best_prog_idx = fitness_set.index(min(fitness_set))
-        prog = sr._programs[idx][best_prog_idx]
-        best_fit = prog.execute(exec_on.reshape(-1, 1))
-    return best_fit
-
-
-def get_capped_score(idx):
-    fitness_set = np.array(
-        [
-            ((prg and abs(prg.fitness_) < 10 and abs(prg.fitness_)) or 10)
-            for prg in sr._programs[idx]
-        ]
-    )
-    best_fit = np.min(fitness_set) * 10
-    return best_fit
-
-
-def get_r2_score(idx):
-    """Get R² score for the best program at a given generation index."""
-    if idx >= len(sr._programs) - 1:
-        return calc_r2(y_actual, predict_final)
-    else:
-        fitness_set = [
-            ((prg and abs(prg.fitness_)) or 100) for prg in sr._programs[idx]
-        ]
-        best_prog_idx = fitness_set.index(min(fitness_set))
-        prog = sr._programs[idx][best_prog_idx]
-        best_fit = prog.execute(x_train.reshape(-1, 1))
-        return calc_r2(y_actual, best_fit)
-
-
 def format_readable_eq(eq):
-    time.sleep(0.1)
+    """Convert gplearn equation format to readable infix notation."""
     eq = str(eq)
     operation = ""
+
     for idx, char in enumerate(eq):
         operation += char
 
@@ -476,6 +366,7 @@ def format_readable_eq(eq):
                 case "div":
                     operator = " / "
                     valid_op = True
+
             if not valid_op:
                 return operation + format_readable_eq(eq[idx + 1 : -1]) + ")"
 
@@ -483,7 +374,8 @@ def format_readable_eq(eq):
             first_exp = ""
             second_exp = ""
             assign_to_first = True
-            for idx_inner, char_inner in enumerate(eq[idx + 1 :]):
+
+            for char_inner in eq[idx + 1 :]:
                 if char_inner == " ":
                     continue
                 elif char_inner == "(":
@@ -508,6 +400,3 @@ def format_readable_eq(eq):
             )
 
     return operation
-
-
-# end
